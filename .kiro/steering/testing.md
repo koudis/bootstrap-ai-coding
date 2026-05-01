@@ -48,8 +48,8 @@ import (
     "testing"
     "pgregory.net/rapid"
     "github.com/stretchr/testify/require"
-    "github.com/user/bootstrap-ai-coding/constants"
-    "github.com/user/bootstrap-ai-coding/naming"
+    "github.com/koudis/bootstrap-ai-coding/internal/constants"
+    "github.com/koudis/bootstrap-ai-coding/internal/naming"
 )
 
 // Feature: bootstrap-ai-coding, Property 12: Container naming is deterministic and collision-resistant
@@ -136,7 +136,7 @@ func TestContainerStartsAndSSHConnects(t *testing.T) {
 ## Coverage Target
 
 ≥ 80% line coverage on all non-integration packages:
-- `constants/`, `naming/`, `ssh/`, `credentials/`, `datadir/`, `portfinder/`, `agent/`, `docker/builder.go`, `agents/claude/`
+- `internal/constants/`, `internal/naming/`, `internal/ssh/`, `internal/credentials/`, `internal/datadir/`, `internal/portfinder/`, `internal/agent/`, `internal/docker/builder.go`, `internal/agents/claude/`
 
 Check coverage:
 ```bash

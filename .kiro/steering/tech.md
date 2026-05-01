@@ -3,7 +3,7 @@
 ## Language & Runtime
 
 - **Go** (primary language)
-- Module path: `github.com/user/bootstrap-ai-coding`
+- Module path: `github.com/koudis/bootstrap-ai-coding`
 
 ## Key Libraries & Frameworks
 

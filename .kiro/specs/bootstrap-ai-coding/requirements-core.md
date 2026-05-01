@@ -23,6 +23,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **Session**: A single lifecycle of a Container from creation to termination.
 - **Base_Container_Image**: The base Docker image for all Containers: `ubuntu:26.04` (Ubuntu 26.04 LTS "Resolute Raccoon"). No other base image or Ubuntu version shall be used.
 - **Container_User**: The non-root OS user account inside the Container under which SSH sessions run. Username is `dev`; UID and GID match those of the Host_User who invoked the CLI.
+- **Conflicting_Image_User**: An existing user in the Base_Container_Image whose UID or GID matches the Host_User's UID or GID. If present, must be resolved before the Container_Image can be built (see Requirement 10a).
 - **Container_Image**: The Docker image built on top of the Base_Container_Image that includes the SSH server, the Container_User setup, and all Enabled_Agent installations.
 - **Agent**: An AI coding assistant module that conforms to the Agent_Interface and can be installed, authenticated, and invoked inside the Container.
 - **Agent_Interface**: The contract defined by the core that every Agent module must satisfy. It covers: unique identification, Dockerfile installation steps, credential store location on the Host, credential mount path inside the Container, credential presence check, and a readiness health check.
@@ -33,6 +34,11 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **SSH_Port**: The host-side TCP port mapped to port 22 inside the Container. The CLI selects the SSH_Port by starting at `2222` and incrementing by 1 until a free port is found on the Host. The selected port is persisted in the Tool_Data_Dir for the project so the same port is reused on subsequent runs. Can be overridden per invocation via `--port`.
 - **Container_User_Home**: The home directory of the Container_User inside the Container. Defined as `/home/<Container_User>` where `<Container_User>` is the username defined in the Container_User glossary entry.
 - **Tool_Data_Dir**: The directory on the Host where the CLI stores all persistent data for a given project (SSH host keys, SSH port assignment, agent manifests). Located at `~/.config/bootstrap-ai-coding/<container-name>/`.
+- **Known_Hosts_File**: The SSH client's `~/.ssh/known_hosts` file on the Host.
+- **Known_Hosts_Entry**: A line in the Known_Hosts_File that associates a host pattern (`[localhost]:<SSH_Port>` or `127.0.0.1:<SSH_Port>`) with the Container's SSH host public key.
+- **SSH_Config_File**: The SSH client configuration file at `~/.ssh/config` on the Host.
+- **Container_Name**: The Docker container name assigned by the tool, derived from the project directory name with a `bac-` prefix (e.g. `bac-my-project`). The name is human-readable and collision-resistant; see Requirement 5 for the full resolution algorithm.
+- **SSH_Config_Entry**: A `Host` stanza in the SSH_Config_File managed by the tool, identified by a `Host` value matching the Container name (e.g. `bac-my-project`).
 
 ---
 
@@ -95,8 +101,15 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 #### Acceptance Criteria
 
-1. WHEN the CLI starts a Container, THE CLI SHALL assign the Container a deterministic name derived from the Project_Path to prevent duplicate containers for the same project.
-2. IF a Container with the same name is already running when the CLI is invoked, THEN THE CLI SHALL print the session summary (as defined in Requirement 17) and exit with a zero exit code without starting a duplicate.
+1. WHEN the CLI starts a Container, THE CLI SHALL assign the Container a human-readable, collision-resistant name derived from the Project_Path using the following algorithm:
+   a. Extract the directory name (last path component) and the parent directory name (second-to-last path component) from the absolute Project_Path. If the project is at the filesystem root (no parent), use `root` as the parent directory name.
+   b. Sanitize each component: convert to lowercase; replace any character not in `[a-z0-9.-]` with `-` (note: `_` is intentionally excluded from the allowed set as it is reserved as the separator between `<parentdir>` and `<dirname>`); collapse consecutive `-` characters into one; trim leading and trailing `-` characters.
+   c. Try candidate names in order, checking only against existing containers whose names start with `constants.ContainerNamePrefix` (`bac-`):
+      - Candidate 1: `bac-<dirname>`
+      - Candidate 2: `bac-<parentdir>_<dirname>`
+      - Candidate 3+: `bac-<parentdir>_<dirname>-2`, `bac-<parentdir>_<dirname>-3`, … (incrementing by 1 until a free name is found)
+   d. The first candidate not already in use is assigned as the Container name. The name is implicitly persisted by the existence of the Tool_Data_Dir directory (`~/.config/bootstrap-ai-coding/<container-name>/`) created for that project — on subsequent invocations the tool finds the existing Tool_Data_Dir and reuses the name encoded in its path. Note: renaming the project directory on disk changes the derived name and is treated as a new project; the old Tool_Data_Dir is not automatically cleaned up.
+2. IF a Container with the derived name already exists (running or stopped) when the CLI is invoked, THE CLI SHALL reconnect to it: print the session summary (as defined in Requirement 17) and exit with a zero exit code without starting a duplicate. If the container was manually removed outside the tool, the Tool_Data_Dir will still exist and the tool will recreate the container reusing the same SSH host key and port.
 3. THE CLI SHALL support a `--stop-and-remove` flag that, when provided with a Project_Path, stops and removes the Container associated with that project regardless of whether it is running or stopped.
 4. WHEN the `--stop-and-remove` flag is used and no matching Container exists, THE CLI SHALL print a descriptive message to stdout and exit with a zero exit code.
 
@@ -171,6 +184,21 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 ---
 
+### Requirement 10a: Container User UID/GID Conflict Resolution
+
+**User Story:** As a developer, I want the tool to detect and resolve UID/GID conflicts in the base image before building, so that the Container_User is always created correctly without silent failures.
+
+#### Acceptance Criteria
+
+1. BEFORE building the Container_Image, THE CLI SHALL inspect the Base_Container_Image to determine whether any existing user already occupies the Host_User's UID or GID.
+2. IF no existing user in the Base_Container_Image has the Host_User's UID or GID, THE CLI SHALL proceed with normal Container_User creation (Requirement 10).
+3. IF an existing user in the Base_Container_Image has the Host_User's UID or GID, THE CLI SHALL print a message to stdout identifying the conflicting username and its UID/GID, and ask the user whether that existing user may be renamed to the Container_User name.
+4. IF the user confirms the rename, THE CLI SHALL generate Dockerfile steps that rename the conflicting user to the Container_User name (using `usermod -l`) instead of creating a new user, and proceed with the image build.
+5. IF the user declines the rename, THE CLI SHALL print a descriptive error message to stderr explaining that the image cannot be built without resolving the UID/GID conflict, and exit with a non-zero exit code.
+6. THE rename operation SHALL preserve the conflicting user's home directory contents and group memberships.
+
+---
+
 ### Requirement 11: Root Execution Prevention
 
 **User Story:** As a developer, I want the tool to refuse to run as root, so that containers are not accidentally created with root-owned files and volumes.
@@ -194,7 +222,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 3. THE CLI SHALL accept a `--port` flag that overrides the automatic SSH_Port selection for the Container; the overridden value SHALL also be persisted in the Tool_Data_Dir.
 4. WHEN a Container is started, THE CLI SHALL bind the Container's internal SSH port 22 to the SSH_Port on the Host.
 5. IF the persisted SSH_Port is in use on the Host by a process other than the Container for this project when the Container is started, THE CLI SHALL print a descriptive error message to stderr identifying the port conflict and exit with a non-zero exit code.
-6. THE CLI SHALL print the SSH_Port and the full SSH connection command as part of the session summary defined in Requirement 18.
+6. THE CLI SHALL print the SSH_Port and the full SSH connection command as part of the session summary defined in Requirement 17.
 
 ---
 
@@ -253,6 +281,24 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 ---
 
+### Requirement 18: SSH known_hosts Consistency
+
+**User Story:** As a developer, I want the tool to keep my `~/.ssh/known_hosts` in sync with the container's SSH host key, so that I never get a spurious "host key changed" warning and am not trained to ignore SSH security alerts.
+
+#### Acceptance Criteria
+
+1. WHEN a Container is successfully started (or is already running), THE CLI SHALL check the Known_Hosts_File for entries matching both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>`.
+2. IF no matching entry exists for either host pattern, THE CLI SHALL append the correct entries (derived from the persisted SSH host key in the Tool_Data_Dir) for both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` to the Known_Hosts_File.
+3. IF matching entries exist and they match the persisted SSH host key, THE CLI SHALL leave the Known_Hosts_File unchanged.
+4. IF matching entries exist but do NOT match the persisted SSH host key, THE CLI SHALL prompt the user asking whether to replace the stale entries; IF the user confirms, THE CLI SHALL remove the stale entries and append the correct ones, then print a message to stdout confirming the update; IF the user declines, THE CLI SHALL print a warning to stdout and continue without modifying the Known_Hosts_File.
+5. IF the Known_Hosts_File does not exist, THE CLI SHALL create it with permissions `0600` before writing.
+6. THE CLI SHALL NOT modify any entries in the Known_Hosts_File other than those matching `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` for the current project's SSH_Port.
+7. WHEN `--stop-and-remove` is used and a Container is successfully stopped and removed, THE CLI SHALL remove the Known_Hosts_Entries for that project's SSH_Port (both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` forms) from the Known_Hosts_File, if present.
+8. WHEN `--purge` completes successfully, THE CLI SHALL remove all Known_Hosts_Entries for all SSH_Ports managed by the tool from the Known_Hosts_File.
+9. WHEN `--no-update-known-hosts` is provided, THE CLI SHALL skip all Known_Hosts_File modifications described in this requirement and print a notice to stdout that `known_hosts` management is disabled.
+
+---
+
 ### Requirement 17: Startup Session Summary
 
 **User Story:** As a developer, I want a concise summary printed when the tool starts a container, so I can immediately see the key session details without having to look them up.
@@ -264,7 +310,30 @@ The core application is responsible for all orchestration: Docker lifecycle mana
    - **Data directory**: the Tool_Data_Dir path for this project
    - **Project directory**: the Project_Path
    - **SSH port**: the SSH_Port
-   - **SSH connect**: the full SSH connection command (e.g. `ssh -p <SSH_Port> <Container_User>@localhost`)
+   - **SSH connect**: the SSH alias command (e.g. `ssh bac-<container-name>`), which relies on the SSH_Config_Entry maintained by Requirement 19
    - **Enabled agents**: the list of Enabled_Agent identifiers
 3. THE session summary SHALL be printed as plain text to stdout, with one field per line.
 4. THE session summary SHALL be printed after all startup checks pass and the Container is confirmed ready.
+
+---
+
+### Requirement 19: SSH Config Entry Management
+
+**User Story:** As a developer, I want the tool to maintain an entry in `~/.ssh/config` for each container, so that I can connect with a simple `ssh bac-<dirname>` alias without specifying the port, user, or hostname manually.
+
+#### Acceptance Criteria
+
+1. WHEN a Container is successfully started (or is already running), THE CLI SHALL check `~/.ssh/config` for an entry whose `Host` value matches the Container name (e.g. `bac-my-project`).
+2. IF no matching entry exists, THE CLI SHALL append an SSH_Config_Entry for the Container to `~/.ssh/config` with the following fields:
+   - `Host <container-name>`
+   - `HostName localhost`
+   - `Port <SSH_Port>`
+   - `User dev` (constants.ContainerUser)
+   - `StrictHostKeyChecking yes` — `IdentityFile` is intentionally omitted: the container already has the user's public key installed in `authorized_keys` (Requirement 4), and the host key is kept consistent in `known_hosts` (Requirement 18), so SSH will authenticate and verify correctly without an explicit key path in the config entry.
+3. IF a matching entry exists and all fields match the current SSH_Port and Container_User, THE CLI SHALL leave `~/.ssh/config` unchanged.
+4. IF a matching entry exists but one or more fields do not match the current values (e.g. the SSH_Port changed), THE CLI SHALL replace the stale entry with the correct one and print a message to stdout confirming the update.
+5. IF `~/.ssh/config` does not exist, THE CLI SHALL create it with permissions `0600` before writing.
+6. THE CLI SHALL NOT modify any entries in `~/.ssh/config` other than the entry whose `Host` value matches the current Container name.
+7. WHEN `--stop-and-remove` is used and a Container is successfully stopped and removed, THE CLI SHALL remove the SSH_Config_Entry for that Container from `~/.ssh/config`, if present.
+8. WHEN `--purge` completes successfully, THE CLI SHALL remove all SSH_Config_Entries whose `Host` value starts with `constants.ContainerNamePrefix` (`bac-`) from `~/.ssh/config`.
+9. WHEN `--no-update-ssh-config` is provided, THE CLI SHALL skip all `~/.ssh/config` modifications described in this requirement and print a notice to stdout that SSH config management is disabled.

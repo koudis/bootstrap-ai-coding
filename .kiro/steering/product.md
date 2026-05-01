@@ -18,7 +18,7 @@ On every successful start (or reconnect to an already-running container), the to
 
 ```
 Data directory:  ~/.config/bootstrap-ai-coding/<container-name>/
-Project:         /path/to/project
+Project directory: /path/to/project
 SSH port:        2222
 SSH connect:     ssh -p 2222 dev@localhost
 Enabled agents:  claude-code
@@ -31,8 +31,9 @@ Enabled agents:  claude-code
 - **Credential persistence**: per-agent bind-mounts keep auth tokens alive across sessions; login once, never again
 - **Non-root safety**: CLI refuses to run as root; containers run as Container_User with UID/GID matching the host user
 - **Stable SSH identity**: SSH host keys are generated once per project and reused across rebuilds — no `known_hosts` churn
+- **known_hosts consistency**: `~/.ssh/known_hosts` is kept in sync automatically; stale entries are detected and the user is prompted before replacement
 - **Persistent port**: SSH port is chosen once per project and remembered — reconnecting is always the same command
-- **Clean uninstall**: `--purge` removes all containers, images, and tool data with a confirmation prompt
+- **Clean uninstall**: `--purge` removes all containers, images, tool data, and `known_hosts` entries with a confirmation prompt
 
 ## Primary user
 
@@ -47,5 +48,6 @@ Developers who want to run AI coding agents (Claude Code, etc.) in an isolated, 
 | `--port <n>` | Override the SSH port (default: auto-selected from 2222 upward) |
 | `--ssh-key <path>` | Override the SSH public key path |
 | `--rebuild` | Force a full container image rebuild |
+| `--no-update-known-hosts` | Skip automatic `~/.ssh/known_hosts` management for this invocation |
 | `--stop-and-remove` | Stop and remove the container for the given project |
-| `--purge` | Remove all tool data, containers, and images (with confirmation) |
+| `--purge` | Remove all tool data, containers, images, and known_hosts entries (with confirmation) |

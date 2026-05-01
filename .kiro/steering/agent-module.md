@@ -24,9 +24,9 @@ import (
     "os"
     "path/filepath"
 
-    "github.com/user/bootstrap-ai-coding/agent"
-    "github.com/user/bootstrap-ai-coding/constants"
-    "github.com/user/bootstrap-ai-coding/docker"
+    "github.com/koudis/bootstrap-ai-coding/internal/agent"
+    "github.com/koudis/bootstrap-ai-coding/internal/constants"
+    "github.com/koudis/bootstrap-ai-coding/internal/docker"
 )
 
 const agentID = "aider" // must be unique, stable, kebab-case
@@ -84,12 +84,53 @@ Add a single blank import — this is the **only** core file that changes:
 
 ```go
 import (
-    _ "github.com/user/bootstrap-ai-coding/agents/claude"
-    _ "github.com/user/bootstrap-ai-coding/agents/aider" // add this line
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/aider" // add this line
 )
 ```
 
-### 4. Document in requirements-agents.md
+### 4. Add integration tests
+
+Every agent package must include an integration test file at:
+
+```
+agents/<agent-name>/integration_test.go
+```
+
+Example: `agents/aider/integration_test.go`
+
+Integration tests must be gated by the `integration` build tag and live in the same package directory as the agent:
+
+```go
+//go:build integration
+
+package aider_test
+
+import (
+    "testing"
+    "github.com/stretchr/testify/require"
+)
+
+func TestAiderAgentInstallsAndRuns(t *testing.T) {
+    // setup: build image with this agent enabled
+    // assert: agent binary is present and executable inside the container
+    // assert: HealthCheck passes
+    // teardown: stop and remove container
+}
+```
+
+Conventions:
+- Always clean up containers in `t.Cleanup()` or `defer`
+- Use `t.TempDir()` for temporary project directories
+- Skip gracefully if Docker is not available:
+  ```go
+  if _, err := exec.LookPath("docker"); err != nil {
+      t.Skip("docker not available")
+  }
+  ```
+- At minimum, cover: agent binary present, `HealthCheck` passes, credential mount path exists
+
+### 5. Document in requirements-agents.md
 
 Add a new section to `.kiro/specs/bootstrap-ai-coding/requirements-agents.md` following the same structure as the Claude Code section (CC-1 through CC-6).
 
@@ -107,9 +148,9 @@ Add a new section to `.kiro/specs/bootstrap-ai-coding/requirements-agents.md` fo
 ## Import Rules for Agent Modules
 
 Agent modules may import:
-- `github.com/user/bootstrap-ai-coding/agent` — to call `agent.Register()`
-- `github.com/user/bootstrap-ai-coding/docker` — for `*docker.DockerfileBuilder`
-- `github.com/user/bootstrap-ai-coding/constants` — for `ContainerUserHome` and other glossary values
+- `github.com/koudis/bootstrap-ai-coding/internal/agent` — to call `agent.Register()`
+- `github.com/koudis/bootstrap-ai-coding/internal/docker` — for `*docker.DockerfileBuilder`
+- `github.com/koudis/bootstrap-ai-coding/internal/constants` — for `ContainerUserHome` and other glossary values
 - Standard library packages
 
 Agent modules must **NOT** import:

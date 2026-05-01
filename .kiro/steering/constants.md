@@ -36,7 +36,7 @@ This means:
 ## Import Pattern
 
 ```go
-import "github.com/user/bootstrap-ai-coding/constants"
+import "github.com/koudis/bootstrap-ai-coding/internal/constants"
 
 // Use like:
 b.From(constants.BaseContainerImage)

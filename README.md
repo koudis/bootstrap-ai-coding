@@ -7,7 +7,11 @@ Primarirly designed to work with Visual Studio Code but it works any IDE with co
 ## Install
 
 ```
-TODO
+# arm64
+wget https://github.com/koudis/bootstrap-ai-coding/releases/latest/download/bac-linux-arm64 -o bac
+
+# amd64 
+wget https://github.com/koudis/bootstrap-ai-coding/releases/latest/download/bac-linux-amd64 -o bac
 ```
 
 ## How to run

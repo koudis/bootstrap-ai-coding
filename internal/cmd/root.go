@@ -143,7 +143,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&flagAgents, "agents", constants.DefaultAgent, "Comma-separated agent IDs to enable")
+	rootCmd.Flags().StringVar(&flagAgents, "agents", constants.DefaultAgents, "Comma-separated agent IDs to enable")
 	rootCmd.Flags().IntVar(&flagPort, "port", 0, "Override SSH port (1024–65535; 0 = auto-select)")
 	rootCmd.Flags().StringVar(&flagSSHKey, "ssh-key", "", "Override SSH public key path")
 	rootCmd.Flags().BoolVar(&flagRebuild, "rebuild", false, "Force a full container image rebuild")

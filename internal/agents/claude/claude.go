@@ -22,7 +22,7 @@ func init() {
 }
 
 func (a *claudeAgent) ID() string {
-	return constants.DefaultAgent
+	return constants.ClaudeCodeAgentName
 }
 
 func (a *claudeAgent) Install(b *docker.DockerfileBuilder) {

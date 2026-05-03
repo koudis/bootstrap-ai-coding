@@ -1,0 +1,288 @@
+// Package augment_test contains property-based and unit tests for the Augment
+// Code agent module. The blank import of the augment package triggers its
+// init() function, which registers the augmentAgent with the global agent
+// registry.
+package augment_test
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
+
+	"github.com/koudis/bootstrap-ai-coding/internal/agent"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
+	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/docker"
+)
+
+// fixedHostKeyPriv and fixedHostKeyPub are stable test values used wherever
+// the exact key content is not the subject of the property under test.
+const (
+	fixedHostKeyPriv = "-----BEGIN OPENSSH PRIVATE KEY-----\nfakePrivKey\n-----END OPENSSH PRIVATE KEY-----"
+	fixedHostKeyPub  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfakeHostPub host-key"
+	fixedPublicKey   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfakePubKey test@host"
+)
+
+// newTestBuilder returns a DockerfileBuilder pre-seeded with the base layer,
+// using fixed key material and UserStrategyCreate with uid=1000, gid=1000.
+func newTestBuilder() *docker.DockerfileBuilder {
+	return docker.NewDockerfileBuilder(
+		1000, 1000,
+		fixedPublicKey,
+		fixedHostKeyPriv, fixedHostKeyPub,
+		docker.UserStrategyCreate, "",
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Property 45: Augment Code agent ID is stable
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 45: Augment Code agent ID is stable
+func TestPropertyAugmentAgentIDIsStable(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a, err := agent.Lookup(constants.AugmentCodeAgentName)
+		require.NoError(rt, err, "augment agent must be registered under constants.AugmentCodeAgentName")
+
+		id := a.ID()
+		require.Equal(rt, constants.AugmentCodeAgentName, id,
+			"ID() must always return constants.AugmentCodeAgentName (%q)", constants.AugmentCodeAgentName)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 46: Augment Code credential presence check is consistent
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 46: Augment Code credential presence check is consistent
+func TestPropertyAugmentCredentialPresenceConsistent(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a, err := agent.Lookup(constants.AugmentCodeAgentName)
+		require.NoError(rt, err, "augment agent must be registered")
+
+		tmpDir := t.TempDir()
+
+		hasFile := rapid.Bool().Draw(rt, "hasFile")
+		isEmpty := rapid.Bool().Draw(rt, "isEmpty")
+
+		if hasFile {
+			content := []byte("token-data")
+			if isEmpty {
+				content = []byte{}
+			}
+			err := os.WriteFile(filepath.Join(tmpDir, "auth.json"), content, 0o600)
+			require.NoError(rt, err, "failed to create test credential file")
+		}
+
+		hasCreds, err := a.HasCredentials(tmpDir)
+		require.NoError(rt, err, "HasCredentials must not error for a valid directory")
+
+		wantCreds := hasFile && !isEmpty
+		require.Equal(rt, wantCreds, hasCreds,
+			"HasCredentials must return true iff a non-empty file exists in the store path")
+	})
+}
+
+// Feature: bootstrap-ai-coding, Property 46b: Augment Code HasCredentials returns false for absent directory
+func TestPropertyAugmentCredentialAbsentDirectory(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a, err := agent.Lookup(constants.AugmentCodeAgentName)
+		require.NoError(rt, err, "augment agent must be registered")
+
+		// Use a path that does not exist.
+		tmpDir := t.TempDir()
+		nonExistent := filepath.Join(tmpDir, "does-not-exist")
+
+		hasCreds, err := a.HasCredentials(nonExistent)
+		require.NoError(rt, err, "HasCredentials must return (false, nil) for absent directory")
+		require.False(rt, hasCreds, "HasCredentials must return false for absent directory")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 47: Augment Code container mount path is always constants.ContainerUserHome/.augment
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 47: Augment Code container mount path is always constants.ContainerUserHome/.augment
+func TestPropertyAugmentContainerMountPath(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a, err := agent.Lookup(constants.AugmentCodeAgentName)
+		require.NoError(rt, err, "augment agent must be registered")
+
+		mountPath := a.ContainerMountPath()
+		wantPath := filepath.Join(constants.ContainerUserHome, ".augment")
+
+		require.Equal(rt, wantPath, mountPath,
+			"ContainerMountPath() must always return %q", wantPath)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 48: Augment Code Dockerfile steps include Node.js 22+ and auggie package
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 48: Augment Code Dockerfile steps include Node.js 22+ and auggie package
+func TestPropertyAugmentInstallIncludesNodeAndPackage(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a, err := agent.Lookup(constants.AugmentCodeAgentName)
+		require.NoError(rt, err, "augment agent must be registered")
+
+		b := newTestBuilder()
+		a.Install(b)
+		content := b.Build()
+
+		require.Contains(rt, content, "setup_22.x",
+			"Dockerfile must include Node.js 22 setup step")
+		require.Contains(rt, content, "@augmentcode/auggie",
+			"Dockerfile must include @augmentcode/auggie installation step")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 49: Augment Code agent is registered and satisfies the Agent interface
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 49: Augment Code agent is registered and satisfies the Agent interface
+func TestPropertyAugmentAgentSatisfiesInterface(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a, err := agent.Lookup(constants.AugmentCodeAgentName)
+		require.NoError(rt, err, "augment agent must be registered under constants.AugmentCodeAgentName")
+		require.NotNil(rt, a)
+
+		// Verify all six interface methods are callable without panicking.
+		id := a.ID()
+		require.NotEmpty(rt, id, "agent ID must not be empty")
+
+		b := newTestBuilder()
+		a.Install(b)
+
+		credPath := a.CredentialStorePath()
+		require.NotEmpty(rt, credPath, "CredentialStorePath must not be empty")
+
+		mountPath := a.ContainerMountPath()
+		require.NotEmpty(rt, mountPath, "ContainerMountPath must not be empty")
+
+		tmpDir := t.TempDir()
+		_, err = a.HasCredentials(tmpDir)
+		require.NoError(rt, err, "HasCredentials on a valid temp dir must not error")
+
+		// HealthCheck requires a live Docker daemon — covered by integration tests.
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests — AC-1, AC-2, AC-3, AC-4, AC-6
+// ---------------------------------------------------------------------------
+
+// TestAugmentAgentRegistered verifies that the blank import causes the augment
+// agent to self-register and that agent.Lookup succeeds for constants.AugmentCodeAgentName.
+// Validates: AC-1
+func TestAugmentAgentRegistered(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err, "augment agent must be registered under constants.AugmentCodeAgentName")
+	require.NotNil(t, a)
+	require.Equal(t, constants.AugmentCodeAgentName, a.ID())
+}
+
+// TestAugmentInstallStepsPresent verifies that Install appends RUN steps that
+// install Node.js 22 (setup_22.x) and the @augmentcode/auggie npm package.
+// Validates: AC-2
+func TestAugmentInstallStepsPresent(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	b := newTestBuilder()
+	a.Install(b)
+	content := b.Build()
+
+	require.Contains(t, content, "setup_22.x",
+		"Dockerfile must contain a Node.js 22 setup step")
+	require.Contains(t, content, "@augmentcode/auggie",
+		"Dockerfile must contain an @augmentcode/auggie installation step")
+}
+
+// TestAugmentCredentialPaths verifies that CredentialStorePath ends with ".augment".
+// Validates: AC-3
+func TestAugmentCredentialPaths(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	storePath := a.CredentialStorePath()
+	require.NotEmpty(t, storePath)
+	require.Equal(t, ".augment", filepath.Base(storePath),
+		"CredentialStorePath must end with .augment")
+}
+
+// TestAugmentContainerMountPath verifies that ContainerMountPath equals
+// filepath.Join(constants.ContainerUserHome, ".augment").
+// Validates: AC-4
+func TestAugmentContainerMountPath(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	want := filepath.Join(constants.ContainerUserHome, ".augment")
+	require.Equal(t, want, a.ContainerMountPath())
+}
+
+// TestAugmentHasCredentialsEmpty verifies that HasCredentials returns (false, nil)
+// when the store directory exists but contains no files.
+// Validates: AC-4
+func TestAugmentHasCredentialsEmpty(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	hasCreds, err := a.HasCredentials(tmpDir)
+	require.NoError(t, err)
+	require.False(t, hasCreds)
+}
+
+// TestAugmentHasCredentialsAbsentDir verifies that HasCredentials returns
+// (false, nil) when the store directory does not exist.
+// Validates: AC-4
+func TestAugmentHasCredentialsAbsentDir(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	nonExistent := filepath.Join(tmpDir, "does-not-exist")
+
+	hasCreds, err := a.HasCredentials(nonExistent)
+	require.NoError(t, err)
+	require.False(t, hasCreds)
+}
+
+// TestAugmentHasCredentialsPresent verifies that HasCredentials returns (true, nil)
+// when a non-empty file exists inside the store directory.
+// Validates: AC-4
+func TestAugmentHasCredentialsPresent(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	err = os.WriteFile(filepath.Join(tmpDir, "auth.json"), []byte(`{"token":"test"}`), 0o600)
+	require.NoError(t, err)
+
+	hasCreds, err := a.HasCredentials(tmpDir)
+	require.NoError(t, err)
+	require.True(t, hasCreds)
+}
+
+// TestAugmentHasCredentialsEmptyFile verifies that HasCredentials returns
+// (false, nil) when the store directory contains only empty files.
+// Validates: AC-4
+func TestAugmentHasCredentialsEmptyFile(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	err = os.WriteFile(filepath.Join(tmpDir, "empty.json"), []byte{}, 0o600)
+	require.NoError(t, err)
+
+	hasCreds, err := a.HasCredentials(tmpDir)
+	require.NoError(t, err)
+	require.False(t, hasCreds, "empty file should not count as credentials")
+}

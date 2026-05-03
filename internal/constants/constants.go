@@ -48,8 +48,18 @@ const (
 	// ManifestFilePath is the path inside the container image where the agent manifest is stored.
 	ManifestFilePath = "/bac-manifest.json"
 
-	// DefaultAgent is the agent ID used when --agents flag is omitted.
-	DefaultAgent = "claude-code"
+	// ClaudeCodeAgentName is the stable Agent_ID for the Claude Code agent module.
+	// Corresponds to the Agent_ID glossary term for Claude Code (CC-1).
+	ClaudeCodeAgentName = "claude-code"
+
+	// AugmentCodeAgentName is the stable Agent_ID for the Augment Code agent module.
+	// Corresponds to the Agent_ID glossary term for Augment Code (AC-1).
+	AugmentCodeAgentName = "augment-code"
+
+	// DefaultAgents is the comma-separated list of agent IDs enabled when the
+	// --agents flag is omitted. Both Claude Code and Augment Code are enabled
+	// by default.
+	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName
 
 	// SSHHostKeyType is the algorithm used for the container's SSH host key pair.
 	// Determines the key file names on disk (ssh_host_<type>_key) and the path

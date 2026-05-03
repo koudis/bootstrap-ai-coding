@@ -91,7 +91,7 @@ sequenceDiagram
     CLI->>CLI: Check effective UID — if 0, print error and exit 1 (Req 11)
     CLI->>CLI: Validate project path exists
     CLI->>Docker: Ping daemon, check version >= 20.10
-    CLI->>AgentRegistry: Resolve enabled agents from --agents flag / config default
+    CLI->>AgentRegistry: Resolve enabled agents from --agents flag (default: "claude-code,augment-code")
     note over AgentRegistry: Unknown agent ID → error, exit 1
     CLI->>SSH: Discover public key (~/.ssh/id_ed25519.pub → id_rsa.pub → --ssh-key)
     CLI->>DataDir: Init Tool_Data_Dir (~/.config/bootstrap-ai-coding/<name>/)
@@ -213,7 +213,9 @@ const (
     ContainerNameParentSep      = "_"   // separator between <parentdir> and <dirname>
     ContainerNameCounterSep     = "-"   // separator before the numeric counter suffix
     ManifestFilePath            = "/bac-manifest.json"
-    DefaultAgent                = "claude-code"
+    ClaudeCodeAgentName          = "claude-code"
+    AugmentCodeAgentName         = "augment-code"
+    DefaultAgents               = ClaudeCodeAgentName + "," + AugmentCodeAgentName
     SSHHostKeyType              = "ed25519"
     MinDockerVersion            = "20.10"
     ContainerSSHPort            = 22

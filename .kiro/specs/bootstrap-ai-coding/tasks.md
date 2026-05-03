@@ -516,6 +516,60 @@ The module path is `github.com/koudis/bootstrap-ai-coding`. All glossary-derived
   - Update any unit tests in `internal/cmd/root_test.go` that assert the old `ssh -p <port> dev@localhost` format to expect the new `ssh bac-<name>` format
   - _Requirements: Req 17.2, Req 19_
 
+- [x] 23. Implement `internal/agents/augment` — Augment Code agent module
+  - [x] 23.1 Create `internal/agents/augment/augment.go`
+    - Private `augmentAgent` struct implementing `agent.Agent`
+    - `init()` calls `agent.Register(&augmentAgent{})`
+    - `ID()` returns `constants.AugmentCodeAgent` (`"augment-code"`)
+    - `Install(b)` appends: `apt-get install curl ca-certificates git`, NodeSource 22.x setup + `apt-get install nodejs`, `npm install -g @augmentcode/auggie`
+    - `CredentialStorePath()` returns `filepath.Join(os.UserHomeDir(), ".augment")`
+    - `ContainerMountPath()` returns `filepath.Join(constants.ContainerUserHome, ".augment")`
+    - `HasCredentials(storePath)` — reads the directory; returns `(false, nil)` if absent; returns `(true, nil)` if any non-empty file exists; returns `(false, err)` on other errors
+    - `HealthCheck(ctx, containerID)` runs `auggie --version` via `docker.ExecInContainer`
+    - Must NOT import `cmd`, `naming`, `ssh`, `credentials`, `datadir`, `portfinder`, or `docker/runner`
+    - _Requirements: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6_
+
+  - [x] 23.2 Add `AugmentCodeAgent = "augment-code"` constant to `internal/constants/constants.go`
+    - Follow the same pattern as `DefaultAgent`
+    - _Requirements: AC-1_
+
+  - [x] 23.3 Write property tests for Augment Code agent
+    - **Property 45: Augment Code agent ID is stable** — `augmentAgent.ID()` always returns `"augment-code"`
+    - **Property 46: Augment Code credential presence check is consistent** — `HasCredentials` returns true iff the directory exists and contains at least one non-empty file; returns `(false, nil)` when directory is absent
+    - **Property 47: Augment Code container mount path is always constants.ContainerUserHome/.augment** — `ContainerMountPath()` always returns `filepath.Join(constants.ContainerUserHome, ".augment")`
+    - **Property 48: Augment Code Dockerfile steps include Node.js 22+ and auggie package** — after `augmentAgent.Install(b)`, `b.Build()` contains `setup_22.x` and `@augmentcode/auggie`
+    - **Property 49: Augment Code agent is registered and satisfies the Agent interface** — after blank-importing `internal/agents/augment`, `agent.Lookup("augment-code")` returns a non-nil agent implementing all six methods
+    - _Requirements: AC-1, AC-2, AC-3, AC-4, AC-5, AC-6_
+
+  - [x] 23.4 Write unit tests for Augment Code agent
+    - `TestAugmentAgentRegistered` — after blank import, `agent.Lookup("augment-code")` succeeds
+    - `TestAugmentInstallStepsPresent` — `Install` adds Node.js 22 (`setup_22.x`) and `@augmentcode/auggie` RUN steps
+    - `TestAugmentCredentialPaths` — `CredentialStorePath` ends with `.augment`
+    - `TestAugmentContainerMountPath` — `ContainerMountPath` equals `filepath.Join(constants.ContainerUserHome, ".augment")`
+    - `TestAugmentHasCredentialsEmpty` — returns `(false, nil)` for empty dir and for absent dir
+    - `TestAugmentHasCredentialsPresent` — returns `(true, nil)` when a non-empty file exists in the dir
+    - _Requirements: AC-1, AC-2, AC-3, AC-4, AC-6_
+
+- [x] 24. Wire Augment Code agent into `main.go`
+  - Add blank import `_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"` to `main.go` alongside the existing Claude import
+  - This is the only core file that changes
+  - _Requirements: AC-6_
+
+- [x] 25. Write integration tests for Augment Code agent
+  - [x] 25.1 Write `TestAugmentAvailableInContainer`
+    - `//go:build integration`; start container with `--agents augment-code`; exec `auggie --version` inside; assert exit 0; clean up in `t.Cleanup()`
+    - _Requirements: AC-2.3_
+
+  - [x] 25.2 Write `TestAugmentHealthCheck`
+    - `//go:build integration`; start container with `--agents augment-code`; call `augmentAgent.HealthCheck(ctx, containerID)`; assert no error; clean up in `t.Cleanup()`
+    - _Requirements: AC-5_
+
+- [x] 26. Checkpoint — Augment Code agent complete
+  - Run `go build ./...` — must succeed
+  - Run `go vet ./...` — must produce no warnings
+  - Run `go test ./...` — all unit and property tests must pass (including new Augment Code tests)
+  - Verify `agent.KnownIDs()` returns both `"augment-code"` and `"claude-code"` when both are blank-imported
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP

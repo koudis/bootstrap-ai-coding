@@ -81,12 +81,12 @@ func TestPropertyAllAgentsSatisfyInterface(t *testing.T) {
 // Feature: bootstrap-ai-coding, Property 28: Claude Code agent ID is stable
 func TestPropertyClaudeAgentIDIsStable(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
-		a, err := agent.Lookup(constants.DefaultAgent)
-		require.NoError(rt, err, "claude agent must be registered under constants.DefaultAgent")
+		a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+		require.NoError(rt, err, "claude agent must be registered under constants.ClaudeCodeAgentName")
 
 		id := a.ID()
-		require.Equal(rt, constants.DefaultAgent, id,
-			"ID() must always return constants.DefaultAgent (%q)", constants.DefaultAgent)
+		require.Equal(rt, constants.ClaudeCodeAgentName, id,
+			"ID() must always return constants.ClaudeCodeAgentName (%q)", constants.ClaudeCodeAgentName)
 	})
 }
 
@@ -97,7 +97,7 @@ func TestPropertyClaudeAgentIDIsStable(t *testing.T) {
 // Feature: bootstrap-ai-coding, Property 29: Claude Code credential presence check is consistent
 func TestPropertyClaudeCredentialPresenceConsistent(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
-		a, err := agent.Lookup(constants.DefaultAgent)
+		a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 		require.NoError(rt, err, "claude agent must be registered")
 
 		// Use a fresh temp dir for each iteration to avoid cross-iteration state.
@@ -127,7 +127,7 @@ func TestPropertyClaudeCredentialPresenceConsistent(t *testing.T) {
 // Feature: bootstrap-ai-coding, Property 30: Claude Code container mount path is always constants.ContainerUserHome/.claude
 func TestPropertyClaudeContainerMountPath(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
-		a, err := agent.Lookup(constants.DefaultAgent)
+		a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 		require.NoError(rt, err, "claude agent must be registered")
 
 		mountPath := a.ContainerMountPath()
@@ -145,7 +145,7 @@ func TestPropertyClaudeContainerMountPath(t *testing.T) {
 // Feature: bootstrap-ai-coding, Property 31: Claude Code Dockerfile steps include Node.js and claude-code package
 func TestPropertyClaudeInstallIncludesNodeAndPackage(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
-		a, err := agent.Lookup(constants.DefaultAgent)
+		a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 		require.NoError(rt, err, "claude agent must be registered")
 
 		b := newTestBuilder()
@@ -164,20 +164,20 @@ func TestPropertyClaudeInstallIncludesNodeAndPackage(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestClaudeAgentRegistered verifies that the blank import causes the claude
-// agent to self-register and that agent.Lookup succeeds for constants.DefaultAgent.
+// agent to self-register and that agent.Lookup succeeds for constants.ClaudeCodeAgentName.
 // Validates: CC-1
 func TestClaudeAgentRegistered(t *testing.T) {
-	a, err := agent.Lookup(constants.DefaultAgent)
-	require.NoError(t, err, "claude agent must be registered under constants.DefaultAgent")
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err, "claude agent must be registered under constants.ClaudeCodeAgentName")
 	require.NotNil(t, a)
-	require.Equal(t, constants.DefaultAgent, a.ID())
+	require.Equal(t, constants.ClaudeCodeAgentName, a.ID())
 }
 
 // TestClaudeInstallStepsPresent verifies that Install appends RUN steps that
 // install Node.js and the @anthropic-ai/claude-code npm package.
 // Validates: CC-2
 func TestClaudeInstallStepsPresent(t *testing.T) {
-	a, err := agent.Lookup(constants.DefaultAgent)
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
 	b := newTestBuilder()
@@ -193,7 +193,7 @@ func TestClaudeInstallStepsPresent(t *testing.T) {
 // TestClaudeCredentialPaths verifies that CredentialStorePath ends with ".claude".
 // Validates: CC-3
 func TestClaudeCredentialPaths(t *testing.T) {
-	a, err := agent.Lookup(constants.DefaultAgent)
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
 	storePath := a.CredentialStorePath()
@@ -206,7 +206,7 @@ func TestClaudeCredentialPaths(t *testing.T) {
 // constants.ContainerUserHome + "/.claude".
 // Validates: CC-4
 func TestClaudeContainerMountPath(t *testing.T) {
-	a, err := agent.Lookup(constants.DefaultAgent)
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
 	want := constants.ContainerUserHome + "/.claude"
@@ -217,7 +217,7 @@ func TestClaudeContainerMountPath(t *testing.T) {
 // when the store directory exists but contains no .credentials.json file.
 // Validates: CC-6
 func TestClaudeHasCredentialsEmpty(t *testing.T) {
-	a, err := agent.Lookup(constants.DefaultAgent)
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
 	tmpDir := t.TempDir()
@@ -230,7 +230,7 @@ func TestClaudeHasCredentialsEmpty(t *testing.T) {
 // when .credentials.json exists inside the store directory.
 // Validates: CC-6
 func TestClaudeHasCredentialsPresent(t *testing.T) {
-	a, err := agent.Lookup(constants.DefaultAgent)
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
 	tmpDir := t.TempDir()
@@ -252,7 +252,7 @@ func TestClaudeHasCredentialsStatError(t *testing.T) {
 		t.Skip("root bypasses permission checks")
 	}
 
-	a, err := agent.Lookup(constants.DefaultAgent)
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
 	// Create a directory and make it unreadable so os.Stat on a file inside

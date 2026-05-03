@@ -346,6 +346,46 @@
 
 ---
 
+#### Property 45: Augment Code agent ID is stable
+
+*For any* invocation, `augmentAgent.ID()` SHALL always return `"augment-code"`.
+
+**Validates: Agent Req AC-1**
+
+---
+
+#### Property 46: Augment Code credential presence check is consistent
+
+*For any* directory path, `HasCredentials` SHALL return `true` if and only if the directory exists and contains at least one non-empty file. It SHALL return `false` when the directory does not exist or contains no non-empty files, and SHALL return `(false, nil)` — not an error — when the directory is absent.
+
+**Validates: Agent Req AC-4**
+
+---
+
+#### Property 47: Augment Code container mount path is always constants.ContainerUserHome/.augment
+
+*For any* invocation, `augmentAgent.ContainerMountPath()` SHALL always return `filepath.Join(constants.ContainerUserHome, ".augment")`.
+
+**Validates: Agent Req AC-3**
+
+---
+
+#### Property 48: Augment Code Dockerfile steps include Node.js 22+ and auggie package
+
+*For any* `DockerfileBuilder`, after calling `augmentAgent.Install(b)`, the resulting Dockerfile SHALL contain `RUN` instructions that install Node.js 22 (via `setup_22.x`) and `@augmentcode/auggie`.
+
+**Validates: Agent Req AC-2**
+
+---
+
+#### Property 49: Augment Code agent is registered and satisfies the Agent interface
+
+*For any* binary compiled with the `agents/augment` package blank-imported, `agent.Lookup("augment-code")` SHALL return a non-nil agent that implements all six methods of the `Agent` interface.
+
+**Validates: Agent Req AC-1, AC-6**
+
+---
+
 ### SSH Config Properties
 
 #### Property 39: SyncSSHConfig never modifies unrelated SSH config entries
@@ -641,6 +681,12 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
 | `TestClaudeHasCredentialsEmpty` | Agent Req CC-6 |
 | `TestClaudeHasCredentialsPresent` | Agent Req CC-6 |
 | `TestClaudeHasCredentialsStatError` | Agent Req CC-6 |
+| `TestAugmentAgentRegistered` | Agent Req AC-1, AC-6 |
+| `TestAugmentInstallStepsPresent` | Agent Req AC-2 |
+| `TestAugmentCredentialPaths` | Agent Req AC-3 |
+| `TestAugmentContainerMountPath` | Agent Req AC-3 |
+| `TestAugmentHasCredentialsEmpty` | Agent Req AC-4 |
+| `TestAugmentHasCredentialsPresent` | Agent Req AC-4 |
 | `TestAll_ReturnsRegisteredAgents` | Req 7.1 |
 | `TestAll_CountMatchesKnownIDs` | Req 7.1 |
 | `TestBuilderEnvAppendsCorrectInstruction` | Req 9.3 |
@@ -698,8 +744,10 @@ Gated by `//go:build integration`. Require a running Docker daemon.
 | `TestSSHConfigEntryLifecycle` | Req 19.1–19.2, 19.7 |
 | `TestClaudeAvailableInContainer` | Agent Req CC-2.3 |
 | `TestClaudeHealthCheck` | Agent Req CC-5 |
+| `TestAugmentAvailableInContainer` | Agent Req AC-2.3 |
+| `TestAugmentHealthCheck` | Agent Req AC-5 |
 
 ### Test Coverage Targets
 
-- Unit + property tests: ≥ 80% line coverage on `naming`, `ssh`, `credentials`, `datadir`, `portfinder`, `agent`, `docker/builder.go`, `agents/claude`
+- Unit + property tests: ≥ 80% line coverage on `naming`, `ssh`, `credentials`, `datadir`, `portfinder`, `agent`, `docker/builder.go`, `agents/claude`, `agents/augment`
 - Integration tests: full happy path + SSH health-check failure path + rebuild path

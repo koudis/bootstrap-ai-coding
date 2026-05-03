@@ -77,13 +77,116 @@ func (c *claudeAgent) HealthCheck(ctx context.Context, containerID string) error
 }
 ```
 
+## Augment Code Agent Module
+
+**Package:** `agents/augment/augment.go`
+**Agent ID:** `"augment-code"`
+**Validates:** Agent Req AC-1 through AC-6
+
+### Overview
+
+Augment Code's CLI tool is **Auggie**, distributed as the `@augmentcode/auggie` npm package. It requires Node.js 22 or later. Authentication tokens and settings are stored in `~/.augment` on the host. The agent is invoked inside the container via the `auggie` command.
+
+### Implementation
+
+```go
+package augment
+
+import (
+    "context"
+    "fmt"
+    "os"
+    "path/filepath"
+
+    "github.com/koudis/bootstrap-ai-coding/internal/agent"
+    "github.com/koudis/bootstrap-ai-coding/internal/constants"
+    "github.com/koudis/bootstrap-ai-coding/internal/docker"
+)
+
+const agentID = "augment-code"
+
+type augmentAgent struct{}
+
+func init() {
+    agent.Register(&augmentAgent{})
+}
+
+// ID returns the stable agent identifier. (AC-1)
+func (a *augmentAgent) ID() string { return agentID }
+
+// Install contributes Node.js 22+ and Auggie npm package install steps. (AC-2)
+func (a *augmentAgent) Install(b *docker.DockerfileBuilder) {
+    b.Run("apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git && rm -rf /var/lib/apt/lists/*")
+    b.Run("curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*")
+    b.Run("npm install -g @augmentcode/auggie")
+}
+
+// CredentialStorePath returns the default host-side credential directory. (AC-3)
+func (a *augmentAgent) CredentialStorePath() string {
+    home, _ := os.UserHomeDir()
+    return filepath.Join(home, ".augment")
+}
+
+// ContainerMountPath returns where credentials are mounted inside the container. (AC-3)
+func (a *augmentAgent) ContainerMountPath() string {
+    return filepath.Join(constants.ContainerUserHome, ".augment")
+}
+
+// HasCredentials checks whether ~/.augment/ is non-empty (contains any file). (AC-4)
+// Augment Code does not document a specific token filename, so we probe for any
+// non-empty file in the directory as evidence that the user has authenticated.
+func (a *augmentAgent) HasCredentials(storePath string) (bool, error) {
+    entries, err := os.ReadDir(storePath)
+    if os.IsNotExist(err) {
+        return false, nil
+    }
+    if err != nil {
+        return false, fmt.Errorf("checking augment credentials: %w", err)
+    }
+    for _, e := range entries {
+        if !e.IsDir() {
+            info, err := e.Info()
+            if err == nil && info.Size() > 0 {
+                return true, nil
+            }
+        }
+    }
+    return false, nil
+}
+
+// HealthCheck verifies `auggie --version` exits 0 inside the container. (AC-5)
+func (a *augmentAgent) HealthCheck(ctx context.Context, containerID string) error {
+    exitCode, err := docker.ExecInContainer(ctx, containerID, []string{"auggie", "--version"})
+    if err != nil {
+        return fmt.Errorf("augment health check failed: %w", err)
+    }
+    if exitCode != 0 {
+        return fmt.Errorf("augment health check failed: 'auggie --version' exited with code %d", exitCode)
+    }
+    return nil
+}
+```
+
+### Design Notes
+
+- **Node.js version**: Auggie requires Node.js 22+. The install step uses `setup_22.x` from NodeSource, pinning to the Node.js 22 LTS line. This differs from the Claude Code module which uses `setup_lts.x`.
+- **Credential detection**: Augment Code does not publicly document a specific token filename. The `HasCredentials` implementation probes for any non-empty file in `~/.augment/` as a proxy for "user has authenticated". This is conservative: a non-empty directory is treated as having credentials.
+- **Login instruction**: When credentials are absent, the core will instruct the user to run `auggie login` inside the container.
+
+---
+
 ## Adding a Future Agent
 
 To add a new agent (e.g. `agents/aider/aider.go`):
 
 1. Create the package implementing `agent.Agent`.
 2. Call `agent.Register(&aiderAgent{})` in `init()`.
-3. Add `_ "github.com/koudis/bootstrap-ai-coding/internal/agents/aider"` to `main.go`.
+3. Add blank imports for all agent packages to `main.go`:
+   ```go
+   _ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+   _ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
+   _ "github.com/koudis/bootstrap-ai-coding/internal/agents/aider"
+   ```
 4. Add a section to `requirements-agents.md` documenting the new agent's requirements.
 
 No other files change.

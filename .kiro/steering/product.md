@@ -20,14 +20,14 @@ On every successful start (or reconnect to an already-running container), the to
 Data directory:  ~/.config/bootstrap-ai-coding/<container-name>/
 Project directory: /path/to/project
 SSH port:        2222
-SSH connect:     ssh -p 2222 dev@localhost
-Enabled agents:  claude-code
+SSH connect:     ssh bac-<container-name>
+Enabled agents:  claude-code, augment-code
 ```
 
 ## Key design goals
 
 - **Zero-friction startup**: one command, one argument, ready to SSH in
-- **Pluggable agents**: AI coding agents (e.g. Claude Code) are self-contained modules — adding a new agent requires no changes to core code
+- **Pluggable agents**: AI coding agents (Claude Code, Augment Code, etc.) are self-contained modules — adding a new agent requires no changes to core code
 - **Credential persistence**: per-agent bind-mounts keep auth tokens alive across sessions; login once, never again
 - **Non-root safety**: CLI refuses to run as root; containers run as Container_User with UID/GID matching the host user
 - **Stable SSH identity**: SSH host keys are generated once per project and reused across rebuilds — no `known_hosts` churn
@@ -37,17 +37,18 @@ Enabled agents:  claude-code
 
 ## Primary user
 
-Developers who want to run AI coding agents (Claude Code, etc.) in an isolated, reproducible container environment without manual Docker setup.
+Developers who want to run AI coding agents (Claude Code, Augment Code, etc.) in an isolated, reproducible container environment without manual Docker setup.
 
 ## CLI flags
 
 | Flag | Description |
 |---|---|
 | `<project-path>` | (positional) Path to the project directory to mount |
-| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code`) |
+| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code`) |
 | `--port <n>` | Override the SSH port (default: auto-selected from 2222 upward) |
 | `--ssh-key <path>` | Override the SSH public key path |
 | `--rebuild` | Force a full container image rebuild |
 | `--no-update-known-hosts` | Skip automatic `~/.ssh/known_hosts` management for this invocation |
+| `--no-update-ssh-config` | Skip automatic `~/.ssh/config` management for this invocation |
 | `--stop-and-remove` | Stop and remove the container for the given project |
 | `--purge` | Remove all tool data, containers, images, and known_hosts entries (with confirmation) |

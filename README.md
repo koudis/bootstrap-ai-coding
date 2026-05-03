@@ -38,7 +38,7 @@ Data directory:  ~/.config/bootstrap-ai-coding/bac-myproject/
 Project directory: /home/user/myproject
 SSH port:        2222
 SSH connect:     ssh bac-myproject
-Enabled agents:  claude-code
+Enabled agents:  claude-code, augment-code
 ```
 
 After that, `ssh bac-myproject` also works — no port or username to remember.
@@ -97,7 +97,7 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | Flag | Description |
 |---|---|
 | `<project-path>` | Path to the project directory to mount (required for start/stop) |
-| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code`) |
+| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code`) |
 | `--port <n>` | Override the SSH port (1024–65535; default: auto-selected from 2222 upward) |
 | `--ssh-key <path>` | Override the SSH public key path |
 | `--rebuild` | Force a full container image rebuild |
@@ -106,16 +106,39 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | `--stop-and-remove` | Stop and remove the container for the given project |
 | `--purge` | Remove all tool data, containers, and images (with confirmation) |
 
+## Supported Agents
+
+Both agents are enabled by default. Use `--agents` to enable a specific subset.
+
+| Agent ID | Tool | Credential store | Container mount |
+|---|---|---|---|
+| `claude-code` | [Claude Code](https://github.com/anthropics/claude-code) by Anthropic | `~/.claude/` | `/home/dev/.claude/` |
+| `augment-code` | [Augment Code](https://www.augmentcode.com) (Auggie CLI) | `~/.augment/` | `/home/dev/.augment/` |
+
+### Examples
+
+```bash
+# Both agents (default)
+bac <project-path>
+
+# Claude Code only
+bac <project-path> --agents claude-code
+
+# Augment Code only
+bac <project-path> --agents augment-code
+```
+
 ## Agents
 
-The default agent is **Claude Code** (`claude-code`).
+Both **Claude Code** (`claude-code`) and **Augment Code** (`augment-code`) are enabled by default.
 
 ### Credential persistence
 
-Credentials are stored on the host (e.g. `~/.claude/` for Claude Code) and bind-mounted into every container. **If you are already logged in on your host machine, the container inherits your credentials automatically — no login step required.** The tool only prompts you to authenticate when no credentials are found:
+Credentials are stored on the host and bind-mounted into every container — so if you are already logged in on your host machine, the container inherits your credentials automatically with no extra login step. The tool only prompts you when no credentials are found:
 
 ```
 Authenticate claude-code inside the container: run 'claude' and complete the login flow.
+Authenticate augment-code inside the container: run 'auggie login' and complete the login flow.
 ```
 
 Once you authenticate inside the container, the tokens are written back to the host-side credential store and reused for every future session across all projects.

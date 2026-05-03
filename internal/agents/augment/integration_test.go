@@ -1,6 +1,6 @@
 //go:build integration
 
-package claude_test
+package augment_test
 
 import (
 	"context"
@@ -18,16 +18,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/agent"
-	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
 )
 
-// setupContainerWithClaude builds a container image with the Claude Code agent
-// installed, starts the container, waits for SSH to be ready, and returns the
-// container name, SSH port, and a cleanup function.
-func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, cleanup func()) {
+// setupContainerWithAugment builds a container image with the Augment Code
+// agent installed, starts the container, waits for SSH to be ready, and
+// returns the container name, SSH port, and a cleanup function.
+func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int, cleanup func()) {
 	t.Helper()
 
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -71,15 +71,15 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 		strategy, conflictingUser,
 	)
 
-	// Install the Claude Code agent steps into the Dockerfile.
-	claudeAgent, err := agent.Lookup(constants.ClaudeCodeAgentName)
-	require.NoError(t, err, "looking up claude agent")
-	claudeAgent.Install(builder)
+	// Install the Augment Code agent steps into the Dockerfile.
+	augmentAgent, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err, "looking up augment agent")
+	augmentAgent.Install(builder)
 
-	port, err := findFreePortClaude()
+	port, err := findFreePortAugment()
 	require.NoError(t, err, "finding free port")
 
-	containerName = constants.ContainerNamePrefix + sanitizeClaude(dirName)
+	containerName = constants.ContainerNamePrefix + sanitizeAugment(dirName)
 	imageTag := containerName + ":latest"
 
 	spec := docker.ContainerSpec{
@@ -102,7 +102,7 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 	}
 
 	_, err = docker.BuildImage(ctx, client, spec)
-	require.NoError(t, err, "building container image with claude")
+	require.NoError(t, err, "building container image with augment")
 
 	_, err = docker.CreateContainer(ctx, client, spec)
 	require.NoError(t, err, "creating container")
@@ -110,7 +110,7 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 	err = docker.StartContainer(ctx, client, containerName)
 	require.NoError(t, err, "starting container")
 
-	// Claude installation takes longer — allow up to 2 minutes for SSH.
+	// Augment installation takes longer — allow up to 2 minutes for SSH.
 	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 120*time.Second)
 	require.NoError(t, err, "waiting for SSH to be ready")
 
@@ -132,53 +132,53 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 }
 
 // ----------------------------------------------------------------------------
-// 16.8 TestClaudeAvailableInContainer
-// Validates: CC-2.3
+// 25.1 TestAugmentAvailableInContainer
+// Validates: AC-2.3
 // ----------------------------------------------------------------------------
 
-func TestClaudeAvailableInContainer(t *testing.T) {
+func TestAugmentAvailableInContainer(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
-	containerName, _, cleanup := setupContainerWithClaude(t)
+	containerName, _, cleanup := setupContainerWithAugment(t)
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
 
-	// Exec `claude --version` inside the container and assert exit 0.
-	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{"claude", "--version"})
-	require.NoError(t, err, "exec claude --version")
-	require.Equal(t, 0, exitCode, "expected 'claude --version' to exit 0")
+	// Exec `auggie --version` inside the container and assert exit 0.
+	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{"auggie", "--version"})
+	require.NoError(t, err, "exec auggie --version")
+	require.Equal(t, 0, exitCode, "expected 'auggie --version' to exit 0")
 }
 
 // ----------------------------------------------------------------------------
-// 16.9 TestClaudeHealthCheck
-// Validates: CC-5
+// 25.2 TestAugmentHealthCheck
+// Validates: AC-5
 // ----------------------------------------------------------------------------
 
-func TestClaudeHealthCheck(t *testing.T) {
+func TestAugmentHealthCheck(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
-	containerName, _, cleanup := setupContainerWithClaude(t)
+	containerName, _, cleanup := setupContainerWithAugment(t)
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
 
-	claudeAgent, err := agent.Lookup(constants.ClaudeCodeAgentName)
-	require.NoError(t, err, "looking up claude agent")
+	augAgent, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err, "looking up augment agent")
 
-	err = claudeAgent.HealthCheck(ctx, containerName)
-	require.NoError(t, err, "claude HealthCheck should return no error")
+	err = augAgent.HealthCheck(ctx, containerName)
+	require.NoError(t, err, "augment HealthCheck should return no error")
 }
 
 // ----------------------------------------------------------------------------
 // Internal helpers
 // ----------------------------------------------------------------------------
 
-func findFreePortClaude() (int, error) {
+func findFreePortAugment() (int, error) {
 	for port := constants.SSHPortStart; port < 65535; port++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err == nil {
@@ -189,7 +189,7 @@ func findFreePortClaude() (int, error) {
 	return 0, fmt.Errorf("no free port found starting at %d", constants.SSHPortStart)
 }
 
-func sanitizeClaude(s string) string {
+func sanitizeAugment(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder
 	for _, r := range s {

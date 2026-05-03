@@ -27,9 +27,10 @@ The path to the project directory on the host. Mounted into the container at `co
 
 Comma-separated list of agent IDs to install in the container.
 
-- Default: `constants.DefaultAgent` (`"claude-code"`)
+- Default: `constants.DefaultAgents` (`"claude-code,augment-code"`)
 - Example: `--agents claude-code`
-- Example: `--agents claude-code,aider`
+- Example: `--agents augment-code`
+- Example: `--agents claude-code,augment-code`
 - Unknown IDs produce an error listing available agents
 - **Validates:** Req 7.4, 7.5
 

@@ -131,6 +131,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:          "bootstrap-ai-coding [project-path]",
 	Short:        "Provision an isolated Docker container for AI-assisted coding",
+	Version:      constants.Version,
 	SilenceUsage: true,
 	RunE:         run,
 }

@@ -94,6 +94,13 @@ const (
 	SSHDirPerm = 0o700
 )
 
+// Version is the build version, injected at link time via:
+//
+//	-ldflags "-X 'github.com/koudis/bootstrap-ai-coding/internal/constants.Version=<tag>'"
+//
+// Falls back to "dev" when built without ldflags (e.g. `go run .`).
+var Version = "dev"
+
 var (
 	// PublicKeyDefaultPaths lists the candidate Public_Key file paths on the Host,
 	// in order of precedence (highest first). The CLI tries each in turn before

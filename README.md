@@ -105,6 +105,7 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | `--no-update-ssh-config` | Skip automatic `~/.ssh/config` management |
 | `--stop-and-remove` | Stop and remove the container for the given project |
 | `--purge` | Remove all tool data, containers, and images (with confirmation) |
+| `--version` | Print the version and exit |
 
 ## Supported Agents
 

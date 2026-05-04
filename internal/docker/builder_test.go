@@ -498,6 +498,25 @@ func TestBuilderCmdAppendsCorrectInstruction(t *testing.T) {
 	require.Contains(t, content, `CMD ["/bin/sh", "-c", "echo hello"]`)
 }
 
+// ---------------------------------------------------------------------------
+// Node.js deduplication tracking tests
+// ---------------------------------------------------------------------------
+
+// TestNodeInstalledTrackingDefaultFalse verifies that a fresh builder has
+// IsNodeInstalled() == false.
+func TestNodeInstalledTrackingDefaultFalse(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	require.False(t, b.IsNodeInstalled(), "fresh builder must have IsNodeInstalled() == false")
+}
+
+// TestNodeInstalledTrackingMarkAndCheck verifies that MarkNodeInstalled()
+// sets the flag and IsNodeInstalled() returns true afterwards.
+func TestNodeInstalledTrackingMarkAndCheck(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	b.MarkNodeInstalled()
+	require.True(t, b.IsNodeInstalled(), "IsNodeInstalled() must return true after MarkNodeInstalled()")
+}
+
 // Feature: bootstrap-ai-coding, Property 3b: Env/Copy/Cmd instructions appear verbatim in the Dockerfile
 func TestPropertyBuilderInstructionsAppearVerbatim(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {

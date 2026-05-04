@@ -29,6 +29,6 @@ The design is split across four files:
 
 ## Related Documents
 
-- `requirements-core.md` — core application requirements (Req 1–20)
+- `requirements-core.md` — core application requirements (Req 1–21)
 - `requirements-agents.md` — agent module requirements (CC-1–CC-6 for Claude Code, AC-1–AC-6 for Augment Code)
 - `requirements-cli-combinations.md` — valid and invalid CLI flag combinations (CLI-1–CLI-6)

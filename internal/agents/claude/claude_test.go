@@ -152,8 +152,8 @@ func TestPropertyClaudeInstallIncludesNodeAndPackage(t *testing.T) {
 		a.Install(b)
 		content := b.Build()
 
-		require.Contains(rt, content, "nodejs",
-			"Dockerfile must include nodejs installation step")
+		require.Contains(rt, content, "setup_22.x",
+			"Dockerfile must include Node.js 22 setup step")
 		require.Contains(rt, content, "@anthropic-ai/claude-code",
 			"Dockerfile must include @anthropic-ai/claude-code installation step")
 	})
@@ -174,7 +174,8 @@ func TestClaudeAgentRegistered(t *testing.T) {
 }
 
 // TestClaudeInstallStepsPresent verifies that Install appends RUN steps that
-// install Node.js and the @anthropic-ai/claude-code npm package.
+// install Node.js 22 and the @anthropic-ai/claude-code npm package when Node.js
+// is not already installed.
 // Validates: CC-2
 func TestClaudeInstallStepsPresent(t *testing.T) {
 	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
@@ -184,8 +185,8 @@ func TestClaudeInstallStepsPresent(t *testing.T) {
 	a.Install(b)
 	content := b.Build()
 
-	require.Contains(t, content, "nodejs",
-		"Dockerfile must contain a Node.js installation step")
+	require.Contains(t, content, "setup_22.x",
+		"Dockerfile must contain a Node.js 22 setup step")
 	require.Contains(t, content, "@anthropic-ai/claude-code",
 		"Dockerfile must contain an @anthropic-ai/claude-code installation step")
 }
@@ -264,4 +265,62 @@ func TestClaudeHasCredentialsStatError(t *testing.T) {
 
 	_, err = a.HasCredentials(locked)
 	require.Error(t, err, "HasCredentials must return an error when os.Stat fails")
+}
+
+// ---------------------------------------------------------------------------
+// Node.js deduplication tests
+// ---------------------------------------------------------------------------
+
+// TestClaudeInstallNodeNotInstalled verifies that when IsNodeInstalled()
+// returns false, Claude appends Node.js install steps and calls MarkNodeInstalled().
+func TestClaudeInstallNodeNotInstalled(t *testing.T) {
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err)
+
+	b := newTestBuilder()
+	require.False(t, b.IsNodeInstalled(), "fresh builder must have IsNodeInstalled() == false")
+
+	a.Install(b)
+	content := b.Build()
+
+	require.Contains(t, content, "setup_22.x",
+		"must install Node.js 22 when not already installed")
+	require.Contains(t, content, "nodejs",
+		"must install nodejs package when not already installed")
+	require.Contains(t, content, "@anthropic-ai/claude-code",
+		"must always install the claude-code npm package")
+	require.True(t, b.IsNodeInstalled(),
+		"MarkNodeInstalled() must be called after Node.js installation")
+}
+
+// TestClaudeInstallNodeAlreadyInstalled verifies that when IsNodeInstalled()
+// returns true, Claude skips Node.js install steps but still installs its npm package.
+func TestClaudeInstallNodeAlreadyInstalled(t *testing.T) {
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err)
+
+	b := newTestBuilder()
+	b.MarkNodeInstalled() // simulate a prior agent having installed Node.js
+	require.True(t, b.IsNodeInstalled())
+
+	linesBefore := len(b.Lines())
+	a.Install(b)
+	content := b.Build()
+
+	// Must NOT contain the Node.js setup step
+	require.NotContains(t, content, "setup_22.x",
+		"must skip Node.js setup when already installed")
+
+	// Must still install the npm package
+	require.Contains(t, content, "@anthropic-ai/claude-code",
+		"must always install the claude-code npm package")
+
+	// Must still install curl/ca-certificates/git (idempotent prereqs)
+	require.Contains(t, content, "curl ca-certificates git",
+		"must always install curl, ca-certificates, git")
+
+	// Should have added exactly 2 lines (apt-get prereqs + npm install)
+	linesAfter := len(b.Lines())
+	require.Equal(t, linesBefore+2, linesAfter,
+		"must add exactly 2 RUN steps when Node.js is already installed (prereqs + npm)")
 }

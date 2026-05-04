@@ -284,24 +284,6 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 ---
 
-### Requirement 18: SSH known_hosts Consistency
-
-**User Story:** As a developer, I want the tool to keep my `~/.ssh/known_hosts` in sync with the container's SSH host key, so that I never get a spurious "host key changed" warning and am not trained to ignore SSH security alerts.
-
-#### Acceptance Criteria
-
-1. WHEN a Container is successfully started (or is already running), THE CLI SHALL check the Known_Hosts_File for entries matching both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>`.
-2. IF no matching entry exists for either host pattern, THE CLI SHALL append the correct entries (derived from the persisted SSH host key in the Tool_Data_Dir) for both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` to the Known_Hosts_File.
-3. IF matching entries exist and they match the persisted SSH host key, THE CLI SHALL leave the Known_Hosts_File unchanged.
-4. IF matching entries exist but do NOT match the persisted SSH host key, THE CLI SHALL prompt the user asking whether to replace the stale entries; IF the user confirms, THE CLI SHALL remove the stale entries and append the correct ones, then print a message to stdout confirming the update; IF the user declines, THE CLI SHALL print a warning to stdout and continue without modifying the Known_Hosts_File.
-5. IF the Known_Hosts_File does not exist, THE CLI SHALL create it with permissions `0600` before writing.
-6. THE CLI SHALL NOT modify any entries in the Known_Hosts_File other than those matching `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` for the current project's SSH_Port.
-7. WHEN `--stop-and-remove` is used and a Container is successfully stopped and removed, THE CLI SHALL remove the Known_Hosts_Entries for that project's SSH_Port (both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` forms) from the Known_Hosts_File, if present.
-8. WHEN `--purge` completes successfully, THE CLI SHALL remove all Known_Hosts_Entries for all SSH_Ports managed by the tool from the Known_Hosts_File.
-9. WHEN `--no-update-known-hosts` is provided, THE CLI SHALL skip all Known_Hosts_File modifications described in this requirement and print a notice to stdout that `known_hosts` management is disabled.
-
----
-
 ### Requirement 17: Startup Session Summary
 
 **User Story:** As a developer, I want a concise summary printed when the tool starts a container, so I can immediately see the key session details without having to look them up.
@@ -317,6 +299,24 @@ The core application is responsible for all orchestration: Docker lifecycle mana
    - **Enabled agents**: the list of Enabled_Agent identifiers
 3. THE session summary SHALL be printed as plain text to stdout, with one field per line.
 4. THE session summary SHALL be printed after all startup checks pass and the Container is confirmed ready.
+
+---
+
+### Requirement 18: SSH known_hosts Consistency
+
+**User Story:** As a developer, I want the tool to keep my `~/.ssh/known_hosts` in sync with the container's SSH host key, so that I never get a spurious "host key changed" warning and am not trained to ignore SSH security alerts.
+
+#### Acceptance Criteria
+
+1. WHEN a Container is successfully started (or is already running), THE CLI SHALL check the Known_Hosts_File for entries matching both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>`.
+2. IF no matching entry exists for either host pattern, THE CLI SHALL append the correct entries (derived from the persisted SSH host key in the Tool_Data_Dir) for both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` to the Known_Hosts_File.
+3. IF matching entries exist and they match the persisted SSH host key, THE CLI SHALL leave the Known_Hosts_File unchanged.
+4. IF matching entries exist but do NOT match the persisted SSH host key, THE CLI SHALL prompt the user asking whether to replace the stale entries; IF the user confirms, THE CLI SHALL remove the stale entries and append the correct ones, then print a message to stdout confirming the update; IF the user declines, THE CLI SHALL print a warning to stdout and continue without modifying the Known_Hosts_File.
+5. IF the Known_Hosts_File does not exist, THE CLI SHALL create it with permissions `0600` before writing.
+6. THE CLI SHALL NOT modify any entries in the Known_Hosts_File other than those matching `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` for the current project's SSH_Port.
+7. WHEN `--stop-and-remove` is used and a Container is successfully stopped and removed, THE CLI SHALL remove the Known_Hosts_Entries for that project's SSH_Port (both `[localhost]:<SSH_Port>` and `127.0.0.1:<SSH_Port>` forms) from the Known_Hosts_File, if present.
+8. WHEN `--purge` completes successfully, THE CLI SHALL remove all Known_Hosts_Entries for all SSH_Ports managed by the tool from the Known_Hosts_File.
+9. WHEN `--no-update-known-hosts` is provided, THE CLI SHALL skip all Known_Hosts_File modifications described in this requirement and print a notice to stdout that `known_hosts` management is disabled.
 
 ---
 

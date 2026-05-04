@@ -25,7 +25,21 @@ const (
 // The full implementation is provided here; agent modules use this type
 // via the Agent.Install method.
 type DockerfileBuilder struct {
-	lines []string
+	lines         []string
+	nodeInstalled bool
+}
+
+// MarkNodeInstalled records that a Node.js installation step has already been
+// appended to the Dockerfile. Subsequent agents can check IsNodeInstalled()
+// to avoid duplicating the Node.js setup.
+func (b *DockerfileBuilder) MarkNodeInstalled() {
+	b.nodeInstalled = true
+}
+
+// IsNodeInstalled reports whether a prior agent has already appended Node.js
+// installation steps to this builder.
+func (b *DockerfileBuilder) IsNodeInstalled() bool {
+	return b.nodeInstalled
 }
 
 // NewDockerfileBuilder returns a builder pre-seeded with the base layer required

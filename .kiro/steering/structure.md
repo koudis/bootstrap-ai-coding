@@ -38,8 +38,10 @@ bootstrap-ai-coding/
     │   └── registry.go                  # AgentRegistry: Register / Lookup / All / KnownIDs
     │
     └── agents/
-        └── claude/
-            └── claude.go                # Claude Code agent module (reference implementation)
+        ├── claude/
+        │   └── claude.go                # Claude Code agent module (reference implementation)
+        └── augment/
+            └── augment.go               # Augment Code agent module
         # future agents: internal/agents/<name>/<name>.go — no core files change
 ```
 
@@ -59,6 +61,7 @@ bootstrap-ai-coding/
 import (
     "github.com/koudis/bootstrap-ai-coding/internal/cmd"
     _ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
 )
 
 // In internal packages:
@@ -79,5 +82,5 @@ import (
 - SSH port: starts at `2222` (constants.SSHPortStart), increments until free, persisted per project
 - SSH host key type: `ed25519` (constants.SSHHostKeyType) — generated once per project, reused across rebuilds
 - Manifest file inside image: `/bac-manifest.json` (constants.ManifestFilePath) — lists enabled agent IDs for rebuild detection
-- Default agent: `claude-code` (constants.DefaultAgent)
+- Default agents: `claude-code,augment-code` (constants.DefaultAgents)
 - File permissions: Tool_Data_Dir `0700` (constants.ToolDataDirPerm), all files within `0600` (constants.ToolDataFilePerm)

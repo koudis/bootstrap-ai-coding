@@ -286,3 +286,61 @@ func TestAugmentHasCredentialsEmptyFile(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasCreds, "empty file should not count as credentials")
 }
+
+// ---------------------------------------------------------------------------
+// Node.js deduplication tests
+// ---------------------------------------------------------------------------
+
+// TestAugmentInstallNodeNotInstalled verifies that when IsNodeInstalled()
+// returns false, Augment appends Node.js install steps and calls MarkNodeInstalled().
+func TestAugmentInstallNodeNotInstalled(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	b := newTestBuilder()
+	require.False(t, b.IsNodeInstalled(), "fresh builder must have IsNodeInstalled() == false")
+
+	a.Install(b)
+	content := b.Build()
+
+	require.Contains(t, content, "setup_22.x",
+		"must install Node.js 22 when not already installed")
+	require.Contains(t, content, "nodejs",
+		"must install nodejs package when not already installed")
+	require.Contains(t, content, "@augmentcode/auggie",
+		"must always install the auggie npm package")
+	require.True(t, b.IsNodeInstalled(),
+		"MarkNodeInstalled() must be called after Node.js installation")
+}
+
+// TestAugmentInstallNodeAlreadyInstalled verifies that when IsNodeInstalled()
+// returns true, Augment skips Node.js install steps but still installs its npm package.
+func TestAugmentInstallNodeAlreadyInstalled(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err)
+
+	b := newTestBuilder()
+	b.MarkNodeInstalled() // simulate a prior agent having installed Node.js
+	require.True(t, b.IsNodeInstalled())
+
+	linesBefore := len(b.Lines())
+	a.Install(b)
+	content := b.Build()
+
+	// Must NOT contain the Node.js setup step
+	require.NotContains(t, content, "setup_22.x",
+		"must skip Node.js setup when already installed")
+
+	// Must still install the npm package
+	require.Contains(t, content, "@augmentcode/auggie",
+		"must always install the auggie npm package")
+
+	// Must still install curl/ca-certificates/git (idempotent prereqs)
+	require.Contains(t, content, "curl ca-certificates git",
+		"must always install curl, ca-certificates, git")
+
+	// Should have added exactly 2 lines (apt-get prereqs + npm install)
+	linesAfter := len(b.Lines())
+	require.Equal(t, linesBefore+2, linesAfter,
+		"must add exactly 2 RUN steps when Node.js is already installed (prereqs + npm)")
+}

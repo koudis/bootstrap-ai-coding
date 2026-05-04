@@ -12,13 +12,9 @@ This document currently covers **Claude Code** as the reference implementation a
 
 ## Glossary
 
-- **Agent_Interface**: The contract defined by the core application that every agent module must implement. See `requirements-core.md` for the full definition.
+> Terms defined in `requirements-core.md` (Agent_Interface, Base_Container_Image, Container_User, Container_User_Home, Credential_Store, Credential_Volume) are not repeated here. See the core glossary for their definitions.
+
 - **Agent_ID**: The unique, stable string identifier for an agent module (e.g. `"claude-code"`). This is the value users supply to the `--agents` flag.
-- **Base_Container_Image**: Defined in `requirements-core.md`. The base Docker image (`ubuntu:26.04`) on which all Container_Images are built.
-- **Container_User**: Defined in `requirements-core.md`. The non-root user (`dev`) inside the Container whose UID/GID match the Host_User.
-- **Container_User_Home**: Defined in `requirements-core.md`. The home directory of the Container_User inside the Container (`/home/<Container_User>`).
-- **Credential_Store**: The directory on the Host where the agent's authentication tokens are persisted. The agent module declares its own default path.
-- **Credential_Volume**: The Docker bind-mount that makes the Credential_Store accessible inside the Container at the path the agent expects.
 - **Health_Check**: A verification step run after container start to confirm the agent is installed and ready to use.
 
 ---
@@ -48,7 +44,7 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 
 #### Acceptance Criteria
 
-1. THE Claude Code module SHALL contribute Dockerfile steps that install Node.js (LTS) as a runtime dependency, compatible with the Base_Container_Image.
+1. THE Claude Code module SHALL contribute Dockerfile steps that install Node.js (LTS) as a runtime dependency, compatible with the Base_Container_Image. Note: when both Claude Code and Augment Code are enabled (the default), the agents share a single Node.js installation. Since Augment Code requires Node.js 22+ (see AC-2), the installed version must satisfy both agents' requirements. In practice, Node.js 22 is the current LTS and satisfies both constraints.
 2. THE Claude Code module SHALL contribute Dockerfile steps that install the `@anthropic-ai/claude-code` npm package globally.
 3. WHEN the container image is built with Claude Code enabled, the `claude` command SHALL be available on the default `PATH` inside the Container for the Container_User.
 4. THE installation steps SHALL NOT require any manual intervention after the container starts.
@@ -134,7 +130,7 @@ Augment Code is an AI coding agent by Augment (augmentcode.com). Its CLI tool is
 
 #### Acceptance Criteria
 
-1. THE Augment Code module SHALL contribute Dockerfile steps that install Node.js 22 or later as a runtime dependency, compatible with the Base_Container_Image.
+1. THE Augment Code module SHALL contribute Dockerfile steps that install Node.js 22 or later as a runtime dependency, compatible with the Base_Container_Image. Note: when both Claude Code and Augment Code are enabled (the default), the agents share a single Node.js installation. The Node.js version installed must be >= 22 to satisfy this requirement; since Node.js 22 is the current LTS, it also satisfies Claude Code's LTS requirement (see CC-2).
 2. THE Augment Code module SHALL contribute Dockerfile steps that install the `@augmentcode/auggie` npm package globally.
 3. WHEN the container image is built with the Augment Code agent enabled, the `auggie` command SHALL be available on the default `PATH` inside the Container for the Container_User.
 4. THE installation steps SHALL NOT require any manual intervention after the container starts.

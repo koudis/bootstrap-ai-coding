@@ -1,10 +1,42 @@
-# Implementation Plan: EnsureBaseImageAbsent integration test precondition
+# Implementation Tasks
 
-## Overview
+## Completed
 
-Extract the base-image-absent precondition into a shared `testutil.EnsureBaseImageAbsent()` helper and call it from `TestMain` in every integration test package. This replaces the manual inspect-and-fail block in `internal/docker` and adds the check to the claude and augment packages. The `TestAFindConflictingUserPullsImageIfAbsent` test is simplified to remove its backup/restore cycle since the image is guaranteed absent by `TestMain`.
+### EnsureBaseImageAbsent integration test precondition
+
+Extract the base-image-absent precondition into a shared `testutil.EnsureBaseImageAbsent()` helper and call it from `TestMain` in every integration test package.
 
 ## Tasks
+
+### Deduplicate Node.js installation across agent modules
+
+When both Claude Code and Augment Code are enabled (the default), both agents independently install Node.js — Claude via `setup_lts.x` and Augment via `setup_22.x`. This results in duplicate `apt-get update`, duplicate NodeSource setup, and duplicate `apt-get install nodejs` steps in the Dockerfile. Since Node.js 22 is the current LTS and satisfies both agents' requirements, the installation should happen once.
+
+**Approach:** Each agent's `Install()` method should skip the Node.js installation if Node.js is already being installed by a prior agent. The simplest mechanism is to have the `DockerfileBuilder` track whether a Node.js install step has already been appended, and expose a method agents can check.
+
+- [x] 6. Deduplicate Node.js installation when multiple agents are enabled
+  - [x] 6.1 Add Node.js tracking to `DockerfileBuilder`
+    - Add a `nodeInstalled bool` field to `DockerfileBuilder`
+    - Add `MarkNodeInstalled()` method that sets the flag
+    - Add `IsNodeInstalled() bool` method that returns the flag
+  - [x] 6.2 Update Claude Code `Install()` to use the tracking
+    - Check `b.IsNodeInstalled()` before appending Node.js install steps
+    - If not installed: install Node.js 22 (changed from `setup_lts.x` to `setup_22.x` to satisfy AC-2's Node.js 22+ requirement), then call `b.MarkNodeInstalled()`
+    - If already installed: skip the `curl` + `apt-get install nodejs` steps, only install the npm package
+    - Keep the `apt-get install curl ca-certificates git` step (idempotent, needed regardless)
+  - [x] 6.3 Update Augment Code `Install()` to use the tracking
+    - Check `b.IsNodeInstalled()` before appending Node.js install steps
+    - If not installed: install Node.js 22 via `setup_22.x`, then call `b.MarkNodeInstalled()`
+    - If already installed: skip the `curl` + `apt-get install nodejs` steps, only install the npm package
+    - Keep the `apt-get install curl ca-certificates git` step (idempotent, needed regardless)
+  - [x] 6.4 Update unit tests for both agents
+    - Test that when `IsNodeInstalled()` returns false, the agent appends Node.js install steps
+    - Test that when `IsNodeInstalled()` returns true, the agent skips Node.js install steps but still installs its npm package
+    - Test that `MarkNodeInstalled()` is called after Node.js installation
+  - [x] 6.5 Verify build and tests pass
+    - Run `go build ./...` — must compile cleanly
+    - Run `go vet ./...` — must pass
+    - Run `go test ./...` — all unit and PBT tests must pass
 
 - [x] 1. Add `EnsureBaseImageAbsent()` to `internal/testutil/consent.go`
   - [x] 1.1 Add `EnsureBaseImageAbsent()` function (gated by `//go:build integration`)

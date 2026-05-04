@@ -32,7 +32,7 @@ import (
     "github.com/koudis/bootstrap-ai-coding/internal/docker"
 )
 
-const agentID = constants.DefaultAgent
+const agentID = constants.ClaudeCodeAgentName
 
 type claudeAgent struct{}
 

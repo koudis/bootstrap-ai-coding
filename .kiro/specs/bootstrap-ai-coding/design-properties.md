@@ -316,7 +316,7 @@
 
 #### Property 28: Claude Code agent ID is stable
 
-*For any* invocation, `claudeAgent.ID()` SHALL always return `constants.DefaultAgent` (`"claude-code"`).
+*For any* invocation, `claudeAgent.ID()` SHALL always return `constants.ClaudeCodeAgentName` (`"claude-code"`).
 
 **Validates: Agent Req CC-1**
 
@@ -637,7 +637,7 @@ func TestClaudeHasCredentials(t *testing.T) {
         if hasFile {
             os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(`{}`), constants.ToolDataFilePerm)
         }
-        a, _ := agent.Lookup(constants.DefaultAgent)
+        a, _ := agent.Lookup(constants.ClaudeCodeAgentName)
         got, err := a.HasCredentials(dir)
         require.NoError(t, err)
         require.Equal(t, hasFile, got)

@@ -420,6 +420,24 @@
 
 ---
 
+---
+
+#### Property 50: Silent mode produces no Docker build output on stdout
+
+*For any* build invocation where `verbose == false`, the `BuildImageWithTimeout` function SHALL NOT write any Docker build stream content to stdout. The only visible output during a silent build is the "Building image..." message printed by the caller before invoking `BuildImage`.
+
+**Validates: Req 20.2**
+
+---
+
+#### Property 51: Verbose mode streams non-empty output for any non-trivial Dockerfile
+
+*For any* Dockerfile containing at least one `RUN` instruction, a `BuildImageWithTimeout` call with `verbose == true` SHALL result in at least one non-empty `stream` line being written to stdout before the build completes successfully.
+
+**Validates: Req 20.3**
+
+---
+
 ## Testing Strategy
 
 ### Dual Testing Approach
@@ -726,6 +744,10 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
 | `TestSSHConfigSkippedWithNoUpdateFlag` | Req 19.9 |
 | `TestNoUpdateSSHConfigFlagWithStopRejected` | CLI-3 |
 | `TestNoUpdateSSHConfigFlagWithPurgeRejected` | CLI-3 |
+| `TestVerboseFlagWithStopRejected` | CLI-3, Req 20.5 |
+| `TestVerboseFlagWithPurgeRejected` | CLI-3, Req 20.5 |
+| `TestVerboseSilentModeNoStdout` | Req 20.2 |
+| `TestVerboseModeStreamsOutput` | Req 20.3 |
 
 ### Integration Tests
 

@@ -101,7 +101,7 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 		HostGID: gid,
 	}
 
-	_, err = docker.BuildImage(ctx, client, spec)
+	_, err = docker.BuildImage(ctx, client, spec, false)
 	require.NoError(t, err, "building container image with claude")
 
 	_, err = docker.CreateContainer(ctx, client, spec)

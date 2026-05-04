@@ -101,7 +101,7 @@ func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int,
 		HostGID: gid,
 	}
 
-	_, err = docker.BuildImage(ctx, client, spec)
+	_, err = docker.BuildImage(ctx, client, spec, false)
 	require.NoError(t, err, "building container image with augment")
 
 	_, err = docker.CreateContainer(ctx, client, spec)

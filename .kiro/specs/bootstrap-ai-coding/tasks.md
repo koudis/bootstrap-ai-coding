@@ -570,6 +570,37 @@ The module path is `github.com/koudis/bootstrap-ai-coding`. All glossary-derived
   - Run `go test ./...` — all unit and property tests must pass (including new Augment Code tests)
   - Verify `agent.KnownIDs()` returns both `"augment-code"` and `"claude-code"` when both are blank-imported
 
+- [x] 27. Implement `--verbose` flag for real-time Docker build output (Req 20)
+  - [x] 27.1 Add `--verbose` flag to `internal/cmd/root.go`
+    - Register `--verbose` / `-v` boolean flag on the Cobra root command
+    - Add `Verbose bool` field to the `Config` struct
+    - Reject `--verbose` in STOP or PURGE mode (CLI-3) — same pattern as `--rebuild` and `--no-update-ssh-config`; include `"--verbose"` in the incompatible-flag error message
+    - Thread `Config.Verbose` through to the `BuildImage` call in `runStart`
+    - _Requirements: Req 20.1, Req 20.5, CLI-3_
+
+  - [x] 27.2 Update `docker/runner.go` — add `verbose bool` parameter to `BuildImage` and `BuildImageWithTimeout`
+    - Change signature: `BuildImage(ctx context.Context, c *Client, spec ContainerSpec, verbose bool) (string, error)`
+    - Change signature: `BuildImageWithTimeout(ctx context.Context, c *Client, spec ContainerSpec, timeout time.Duration, verbose bool) (string, error)`
+    - **Silent mode** (`verbose == false`, default): drain the Docker SDK `io.ReadCloser` response stream in a goroutine; decode each newline-delimited JSON object; accumulate `stream` values in a `strings.Builder` for error reporting only; write nothing to stdout
+    - **Verbose mode** (`verbose == true`): decode each JSON object from the stream; write each non-empty `stream` value to `os.Stdout` immediately as it arrives; error detection and timeout handling are identical to silent mode
+    - In both modes: detect a JSON object with a non-empty `error` field and return it as a Go error; respect the `ImageBuildTimeout` deadline
+    - Update all existing callers of `BuildImage` / `BuildImageWithTimeout` in `internal/cmd/root.go` to pass the `verbose` argument
+    - _Requirements: Req 20.2, Req 20.3, Req 20.4, Req 20.6_
+
+  - [x] 27.3 Write unit tests for verbose flag validation
+    - `TestVerboseFlagWithStopRejected` — `--verbose` + `--stop-and-remove` → descriptive error naming `--verbose`, exit 1 (CLI-3)
+    - `TestVerboseFlagWithPurgeRejected` — `--verbose` + `--purge` → descriptive error naming `--verbose`, exit 1 (CLI-3)
+    - `TestVerboseSilentModeNoStdout` — call `BuildImageWithTimeout` with `verbose=false` using a fake/mock build stream; assert nothing is written to stdout
+    - `TestVerboseModeStreamsOutput` — call `BuildImageWithTimeout` with `verbose=true` using a fake build stream containing a `stream` value; assert that value is written to stdout
+    - _Requirements: Req 20.2, Req 20.3, Req 20.5, CLI-3_
+
+  - [x] 27.4 Write property tests for verbose mode
+    - **Property 50: Silent mode produces no Docker build output on stdout**
+    - For any build invocation where `verbose == false`, `BuildImageWithTimeout` SHALL NOT write any Docker build stream content to stdout
+    - **Property 51: Verbose mode streams non-empty output for any non-trivial Dockerfile**
+    - For any Dockerfile containing at least one `RUN` instruction, a `BuildImageWithTimeout` call with `verbose == true` SHALL result in at least one non-empty `stream` line being written to stdout
+    - _Requirements: Req 20.2, Req 20.3_
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP

@@ -118,7 +118,7 @@ sequenceDiagram
         else No conflict
             CLI->>CLI: Set user_strategy = create (use useradd in Dockerfile)
         end
-        CLI->>Docker: Build image (DockerfileBuilder: ubuntu:26.04 + user_strategy + sshd + host key + agents + manifest)
+        CLI->>Docker: Build image (DockerfileBuilder: ubuntu:26.04 + user_strategy + sshd + host key + agents + manifest) [verbose=Config.Verbose]
     end
     CLI->>Docker: Inspect container by name
     alt Container already running
@@ -224,6 +224,7 @@ const (
     SSHDirPerm                  = 0o700
     KnownHostsFile              = "~/.ssh/known_hosts"
     SSHConfigFile               = "~/.ssh/config"
+    ImageBuildTimeout           = 5 * time.Minute  // Image_Build_Timeout glossary term
 )
 ```
 
@@ -324,6 +325,33 @@ func FindConflictingUser(ctx context.Context, client *Client, uid, gid int) (*Im
 ```
 
 **Validates: Req 9.1–9.3, Req 10.1–10.5, Req 10a.4, Req 13.2**
+
+---
+
+### Docker Image Build — Verbose Mode
+
+`docker/runner.go` exposes `BuildImage` and `BuildImageWithTimeout`. Both accept a `verbose bool` parameter that controls how the Docker daemon's build response stream is handled.
+
+The Docker SDK's `client.ImageBuild` returns an `io.ReadCloser` whose body is a sequence of newline-delimited JSON objects, each with a `stream` field (progress text) and optionally an `error` field.
+
+**Silent mode (`verbose == false`, default):**
+The stream is drained in a background goroutine. Each decoded `stream` value is accumulated in a `strings.Builder` for error reporting only. No output is written to stdout. The "Building image..." message (Req 14.5) is the only visible indication that a build is in progress.
+
+**Verbose mode (`verbose == true`):**
+Each decoded `stream` value is written to `os.Stdout` immediately as it arrives, producing real-time layer-by-layer progress and `RUN` step output. Error detection and timeout handling are identical to silent mode.
+
+```go
+// BuildImage builds a Docker image from the spec's Dockerfile.
+// When verbose is true, build output is streamed to os.Stdout in real time.
+func BuildImage(ctx context.Context, c *Client, spec ContainerSpec, verbose bool) (string, error)
+
+// BuildImageWithTimeout is the underlying implementation used by BuildImage.
+func BuildImageWithTimeout(ctx context.Context, c *Client, spec ContainerSpec, timeout time.Duration, verbose bool) (string, error)
+```
+
+The `verbose` flag is threaded from `Config.Verbose` → `runStart` → `BuildImage`. It is never consulted when no build is triggered (manifest matches and `--rebuild` is absent).
+
+**Validates: Req 20.2, 20.3, 20.4, 20.6**
 
 ---
 
@@ -496,6 +524,7 @@ type Config struct {
     SSHKeyPath         string
     SSHPort            int    // 0 = auto-select
     Rebuild            bool
+    Verbose            bool
     NoUpdateKnownHosts bool
     NoUpdateSSHConfig  bool
     CredStoreOverrides map[string]string
@@ -546,7 +575,7 @@ type SessionSummary struct {
 | `--stop-and-remove` and `--purge` both set | CLI-1 | Descriptive error → stderr, exit 1 |
 | START or STOP mode and `<project-path>` absent | CLI-2 | Usage message → stderr, exit 1 |
 | PURGE mode and `<project-path>` provided | CLI-2 | Descriptive error → stderr, exit 1 |
-| STOP or PURGE mode and any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config` set | CLI-3 | Descriptive error naming the incompatible flag(s) → stderr, exit 1 |
+| STOP or PURGE mode and any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config`, `--verbose` set | CLI-3 | Descriptive error naming the incompatible flag(s) → stderr, exit 1 |
 | `--port` value outside 1024–65535 | CLI-5 | Descriptive error → stderr, exit 1 |
 | `--agents` parses to empty list | CLI-6 | Descriptive error → stderr, exit 1 |
 | `--agents` contains unknown agent ID | CLI-6 | Unknown ID + available IDs → stderr, exit 1 |
@@ -564,6 +593,7 @@ type SessionSummary struct {
 | Conflicting_Image_User found, user declines rename | UID/GID conflict check | "Cannot build without resolving UID/GID conflict" → stderr, exit 1 |
 | Agent manifest mismatch | Image inspect on startup | "Run with --rebuild" message → stdout, exit 0 |
 | Image build failure | Docker build | Build log → stderr, exit 1 |
+| Image build timeout (`constants.ImageBuildTimeout`) | Docker build | Timeout error → stderr, exit 1 |
 | Container start failure | Docker start | Stop container, error → stderr, exit 1 |
 | SSH health check timeout | Post-start TCP poll | Stop container, error → stderr, exit 1 |
 | Persisted port in use by another process | Port check before start | Port conflict message → stderr, exit 1 |

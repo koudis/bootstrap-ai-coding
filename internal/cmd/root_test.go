@@ -239,7 +239,7 @@ func TestNoUpdateSSHConfigFlagWithPurgeRejected(t *testing.T) {
 func TestValidateStartOnlyFlagsAllowedInStartMode(t *testing.T) {
 	startOnlyFlags := []string{
 		"agents", "port", "ssh-key", "rebuild",
-		"no-update-known-hosts", "no-update-ssh-config",
+		"no-update-known-hosts", "no-update-ssh-config", "verbose",
 	}
 	for _, flag := range startOnlyFlags {
 		err := cmd.ValidateStartOnlyFlags(cmd.ModeStart, []string{flag})
@@ -329,4 +329,28 @@ func TestPropertyExpandHomeNeverReturnsTilde(t *testing.T) {
 			len(result) >= 2 && result[:2] == "~/",
 			"ExpandHome(%q) = %q must not start with ~/", input, result)
 	})
+}
+
+// TestVerboseFlagWithStopRejected verifies that --verbose is rejected when
+// used with --stop-and-remove (CLI-3).
+// Validates: Req 20.5, CLI-3
+func TestVerboseFlagWithStopRejected(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModeStop, []string{"verbose"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--verbose",
+		"error must name the offending flag")
+	require.Contains(t, err.Error(), "--stop-and-remove",
+		"error must name the conflicting mode flag")
+}
+
+// TestVerboseFlagWithPurgeRejected verifies that --verbose is rejected when
+// used with --purge (CLI-3).
+// Validates: Req 20.5, CLI-3
+func TestVerboseFlagWithPurgeRejected(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModePurge, []string{"verbose"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--verbose",
+		"error must name the offending flag")
+	require.Contains(t, err.Error(), "--purge",
+		"error must name the conflicting mode flag")
 }

@@ -73,6 +73,7 @@ func ValidateStartOnlyFlags(mode Mode, changedFlags []string) error {
 		"rebuild":              true,
 		"no-update-known-hosts": true,
 		"no-update-ssh-config": true,
+		"verbose":              true,
 	}
 	for _, name := range changedFlags {
 		if startOnly[name] {
@@ -126,6 +127,7 @@ var (
 	flagPurge              bool
 	flagNoUpdateKnownHosts bool
 	flagNoUpdateSSHConfig  bool
+	flagVerbose            bool
 )
 
 var rootCmd = &cobra.Command{
@@ -152,6 +154,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagPurge, "purge", false, "Remove all tool data, containers, and images (with confirmation)")
 	rootCmd.Flags().BoolVar(&flagNoUpdateKnownHosts, "no-update-known-hosts", false, "Skip automatic ~/.ssh/known_hosts management")
 	rootCmd.Flags().BoolVar(&flagNoUpdateSSHConfig, "no-update-ssh-config", false, "Skip automatic ~/.ssh/config management")
+	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Stream Docker build output to stdout in real time")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -191,6 +194,9 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 		if cmd.Flags().Changed("no-update-ssh-config") {
 			return fmt.Errorf("--no-update-ssh-config is not valid with %s", modeFlag(mode))
+		}
+		if cmd.Flags().Changed("verbose") {
+			return fmt.Errorf("--verbose is not valid with %s", modeFlag(mode))
 		}
 	}
 
@@ -553,7 +559,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		}
 
 		fmt.Println("Building image...")
-		buildOutput, err := dockerpkg.BuildImage(ctx, c, spec)
+		buildOutput, err := dockerpkg.BuildImage(ctx, c, spec, flagVerbose)
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildOutput)
 			return fmt.Errorf("image build failed: %w", err)

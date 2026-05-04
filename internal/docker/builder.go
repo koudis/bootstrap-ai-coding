@@ -56,7 +56,7 @@ func NewDockerfileBuilder(uid, gid int, publicKey, hostKeyPriv, hostKeyPub strin
 	b.From(constants.BaseContainerImage)
 
 	// 2. Install openssh-server and sudo
-	b.Run("apt-get update && apt-get install -y --no-install-recommends openssh-server sudo && rm -rf /var/lib/apt/lists/*")
+	b.Run("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server sudo && rm -rf /var/lib/apt/lists/*")
 
 	// 3. Create or rename the Container_User with matching UID/GID
 	switch strategy {

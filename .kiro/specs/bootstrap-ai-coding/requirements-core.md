@@ -39,6 +39,8 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **SSH_Config_File**: The SSH client configuration file at `~/.ssh/config` on the Host.
 - **Container_Name**: The Docker container name assigned by the tool, derived from the project directory name with a `bac-` prefix (e.g. `bac-my-project`). The name is human-readable and collision-resistant; see Requirement 5 for the full resolution algorithm.
 - **SSH_Config_Entry**: A `Host` stanza in the SSH_Config_File managed by the tool, identified by a `Host` value matching the Container name (e.g. `bac-my-project`).
+- **Image_Build_Timeout**: The maximum wall-clock duration the CLI will wait for a Container_Image build to complete before cancelling it. Defined as `constants.ImageBuildTimeout` (5 minutes). Agent installation steps (Node.js, npm packages) are legitimately slow on a cold cache, but a build that exceeds this limit is assumed to be hung and is terminated.
+- **Verbose_Mode**: The operating mode activated by the `--verbose` (`-v`) flag. When Verbose_Mode is active, all Docker build output (layer-by-layer progress, `RUN` step output, etc.) is streamed to stdout in real time during a Container_Image build. When Verbose_Mode is inactive (the default), the build runs silently and only the "Building image..." message is shown.
 
 ---
 
@@ -251,6 +253,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 4. THE CLI SHALL support a `--rebuild` flag that forces a full Container_Image rebuild regardless of the existing manifest.
 5. WHEN a rebuild is triggered (automatically or via `--rebuild`), THE CLI SHALL print a message to stdout indicating that the image is being built.
 6. IF the image build fails, THE CLI SHALL print the build output to stderr and exit with a non-zero exit code.
+7. THE CLI SHALL enforce a maximum build duration of the Image_Build_Timeout. IF the build exceeds this deadline, THE CLI SHALL cancel the build, print a descriptive error message to stderr identifying the timeout, and exit with a non-zero exit code.
 
 ---
 
@@ -337,3 +340,18 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 7. WHEN `--stop-and-remove` is used and a Container is successfully stopped and removed, THE CLI SHALL remove the SSH_Config_Entry for that Container from `~/.ssh/config`, if present.
 8. WHEN `--purge` completes successfully, THE CLI SHALL remove all SSH_Config_Entries whose `Host` value starts with `constants.ContainerNamePrefix` (`bac-`) from `~/.ssh/config`.
 9. WHEN `--no-update-ssh-config` is provided, THE CLI SHALL skip all `~/.ssh/config` modifications described in this requirement and print a notice to stdout that SSH config management is disabled.
+
+---
+
+### Requirement 20: Verbose Docker Build Output
+
+**User Story:** As a developer, I want to see Docker build output in real time when I choose to, so that I can monitor progress and diagnose slow or failing builds without having to guess what is happening.
+
+#### Acceptance Criteria
+
+1. THE CLI SHALL accept a `--verbose` flag (short form: `-v`) that activates Verbose_Mode for the current invocation.
+2. WHEN `--verbose` is NOT set (default), THE CLI SHALL run the Container_Image build silently: only the "Building image..." message is printed to stdout, and all Docker build output is discarded after being read (to drain the stream and detect errors).
+3. WHEN `--verbose` IS set, THE CLI SHALL stream all Docker build output to stdout in real time as each JSON-encoded build message is received from the Docker daemon, including layer-by-layer progress lines and `RUN` step output.
+4. WHEN `--verbose` IS set and the build fails, THE CLI SHALL still print the build error to stderr and exit with a non-zero exit code (consistent with Req 14.6).
+5. THE `--verbose` flag SHALL only be valid in START mode; it is a START-only flag subject to the same CLI-3 constraint as `--rebuild`, `--agents`, `--port`, `--ssh-key`, `--no-update-known-hosts`, and `--no-update-ssh-config`.
+6. WHEN `--verbose` is set but no build is triggered (the existing image matches the manifest and `--rebuild` is not set), THE CLI SHALL NOT print any Docker build output — there is nothing to stream.

@@ -585,6 +585,50 @@ type SessionSummary struct {
 
 ---
 
+## Integration Test Infrastructure
+
+### Shared helpers (`internal/testutil`)
+
+All integration test packages share common setup logic via `internal/testutil/consent.go` (gated by `//go:build integration`):
+
+**`RequireIntegrationConsent()`** — checks `BAC_INTEGRATION_CONSENT` env var. If not set to `yes`, prints a warning to stderr and exits with code 1. Called from `TestMain` in every integration test package after verifying Docker is available.
+
+**`EnsureBaseImageAbsent()`** — connects to Docker, checks if `constants.BaseContainerImage` is present locally, and removes it if so. This guarantees every suite starts from a clean slate: the first test that builds a container triggers a fresh pull of the base image. Called from `TestMain` after `RequireIntegrationConsent()`.
+
+The consent check runs after the Docker availability check — if Docker is not installed, the suite proceeds directly to `m.Run()` and individual tests skip themselves gracefully.
+
+### Consent gate
+
+When `BAC_INTEGRATION_CONSENT` is **not** set to `yes`, the suite prints a warning to stderr and aborts with exit code 1.
+
+```
+WARNING: Integration tests interact with the local Docker daemon.
+They may pull, build, delete, and update Docker images and containers.
+
+To run these tests, set the environment variable:
+  BAC_INTEGRATION_CONSENT=yes go test -tags integration ./...
+
+Aborted — no consent given.
+```
+
+**To run integration tests:**
+
+```bash
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+```
+
+### Base image precondition
+
+`EnsureBaseImageAbsent()` removes `constants.BaseContainerImage` from the local Docker store at the start of every integration suite. This ensures:
+
+1. The auto-pull path is always exercised (the first test in each package triggers a pull)
+2. No stale cached image can mask regressions in pull logic
+3. Developers don't need to manually run `docker rmi` before testing
+
+The `TestAFindConflictingUserPullsImageIfAbsent` test (in `internal/docker`) is named with an "A" prefix so it runs first alphabetically. It calls `FindConflictingUser` on an absent image and asserts the function succeeds (pulling the image automatically). All subsequent tests in the suite benefit from the now-cached image.
+
+---
+
 ## Core Error Handling
 
 ### CLI Flag Combination Errors (validated before all other checks)

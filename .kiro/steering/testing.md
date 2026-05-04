@@ -20,24 +20,42 @@
 - Require a live Docker daemon
 - Cover the full happy path, SSH connectivity, volume sync, credential persistence
 
-#### Environment precondition: base image must NOT be present
+#### Consent gate
 
-The `internal/docker` integration suite enforces via `TestMain` that `constants.BaseContainerImage` (`ubuntu:26.04`) is **not** present in the local Docker image store when the suite starts. This is required because `TestFindConflictingUserPullsImageIfAbsent` specifically tests the auto-pull path — if the image is already cached, that test would never exercise the pull logic and its result would be a false positive.
+Every integration test package has a `TestMain` that prompts for explicit consent before running, because the tests interact with the local Docker daemon and may pull, build, delete, and update Docker images and containers.
 
-If the image is present, `TestMain` fails immediately with:
+When `BAC_INTEGRATION_CONSENT` is **not** set to `yes`, the suite prints a warning and aborts:
 
 ```
-INTEGRATION TEST ENVIRONMENT ERROR
-The base image "ubuntu:26.04" is already present in the local Docker image store.
-...
-Fix: docker rmi ubuntu:26.04
+WARNING: Integration tests interact with the local Docker daemon.
+They may pull, build, delete, and update Docker images and containers.
+
+To run these tests, set the environment variable:
+  BAC_INTEGRATION_CONSENT=yes go test -tags integration ./...
+
+Aborted — no consent given.
 ```
 
-**Before running integration tests, always remove the base image:**
+**To run integration tests:**
 
 ```bash
-docker rmi ubuntu:26.04
-go test -tags integration -timeout 30m ./...
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+```
+
+#### Base image precondition: automatic removal
+
+Every integration test package calls `testutil.EnsureBaseImageAbsent()` in `TestMain` (after the consent gate). This helper removes `constants.BaseContainerImage` from the local Docker store if present, so the suite always starts from a clean slate.
+
+- The first test that builds a container triggers a fresh pull of the base image
+- All subsequent tests in the suite reuse the now-cached image
+- No manual `docker rmi` step is needed before running tests
+
+In `internal/docker`, `TestAFindConflictingUserPullsImageIfAbsent` (named with `A` prefix so it runs first alphabetically) specifically validates the auto-pull path: it calls `FindConflictingUser` when the image is absent and asserts the function succeeds.
+
+**Running integration tests:**
+
+```bash
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
 ```
 
 ---

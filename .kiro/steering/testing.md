@@ -16,9 +16,29 @@
 
 ### Integration Tests
 - Gated by `//go:build integration`
-- Run with `go test -tags integration ./...`
+- Run with `go test -tags integration -timeout 30m ./...`
 - Require a live Docker daemon
 - Cover the full happy path, SSH connectivity, volume sync, credential persistence
+
+#### Environment precondition: base image must NOT be present
+
+The `internal/docker` integration suite enforces via `TestMain` that `constants.BaseContainerImage` (`ubuntu:26.04`) is **not** present in the local Docker image store when the suite starts. This is required because `TestFindConflictingUserPullsImageIfAbsent` specifically tests the auto-pull path — if the image is already cached, that test would never exercise the pull logic and its result would be a false positive.
+
+If the image is present, `TestMain` fails immediately with:
+
+```
+INTEGRATION TEST ENVIRONMENT ERROR
+The base image "ubuntu:26.04" is already present in the local Docker image store.
+...
+Fix: docker rmi ubuntu:26.04
+```
+
+**Before running integration tests, always remove the base image:**
+
+```bash
+docker rmi ubuntu:26.04
+go test -tags integration -timeout 30m ./...
+```
 
 ---
 

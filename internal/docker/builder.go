@@ -110,10 +110,21 @@ func NewDockerfileBuilder(uid, gid int, publicKey, hostKeyPriv, hostKeyPub strin
 	// 8. Ensure sshd runtime dir exists
 	b.Run("mkdir -p /run/sshd")
 
-	// 9. Default command: start sshd in the foreground
-	b.lines = append(b.lines, `CMD ["/usr/sbin/sshd", "-D"]`)
+	// NOTE: CMD is intentionally NOT set here. The caller (cmd/root.go) must
+	// append agent Install() steps and the manifest RUN, then call Finalize()
+	// to append the CMD as the very last instruction. This ensures all RUN
+	// steps are ordered before CMD so Docker's layer cache is not busted by
+	// agent install steps appearing after CMD.
 
 	return b
+}
+
+// Finalize appends the CMD instruction that starts sshd in the foreground.
+// It must be called after all agent Install() steps and the manifest RUN have
+// been appended — CMD must always be the last Dockerfile instruction so that
+// agent RUN layers are cached correctly.
+func (b *DockerfileBuilder) Finalize() {
+	b.lines = append(b.lines, `CMD ["/usr/sbin/sshd", "-D"]`)
 }
 
 // From appends a FROM instruction.

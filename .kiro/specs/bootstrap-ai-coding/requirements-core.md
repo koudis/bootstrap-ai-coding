@@ -39,7 +39,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **SSH_Config_File**: The SSH client configuration file at `~/.ssh/config` on the Host.
 - **Container_Name**: The Docker container name assigned by the tool, derived from the project directory name with a `bac-` prefix (e.g. `bac-my-project`). The name is human-readable and collision-resistant; see Requirement 5 for the full resolution algorithm.
 - **SSH_Config_Entry**: A `Host` stanza in the SSH_Config_File managed by the tool, identified by a `Host` value matching the Container name (e.g. `bac-my-project`).
-- **Image_Build_Timeout**: The maximum wall-clock duration the CLI will wait for a Container_Image build to complete before cancelling it. Defined as `constants.ImageBuildTimeout` (5 minutes). Agent installation steps (Node.js, npm packages) are legitimately slow on a cold cache, but a build that exceeds this limit is assumed to be hung and is terminated.
+- **Image_Build_Timeout**: The maximum wall-clock duration the CLI will wait for a Container_Image build to complete before cancelling it. Defined as `constants.ImageBuildTimeout` (8 minutes). Agent installation steps (Node.js, npm packages) are legitimately slow on a cold cache, but a build that exceeds this limit is assumed to be hung and is terminated.
 - **Verbose_Mode**: The operating mode activated by the `--verbose` (`-v`) flag. When Verbose_Mode is active, all Docker build output (layer-by-layer progress, `RUN` step output, etc.) is streamed to stdout in real time during a Container_Image build. When Verbose_Mode is inactive (the default), the build runs silently and only the "Building image..." message is shown.
 
 ---
@@ -355,3 +355,19 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 4. WHEN `--verbose` IS set and the build fails, THE CLI SHALL still print the build error to stderr and exit with a non-zero exit code (consistent with Req 14.6).
 5. THE `--verbose` flag SHALL only be valid in START mode; it is a START-only flag subject to the same CLI-3 constraint as `--rebuild`, `--agents`, `--port`, `--ssh-key`, `--no-update-known-hosts`, and `--no-update-ssh-config`.
 6. WHEN `--verbose` is set but no build is triggered (the existing image matches the manifest and `--rebuild` is not set), THE CLI SHALL NOT print any Docker build output — there is nothing to stream.
+
+---
+
+### Requirement 21: Dockerfile Instruction Ordering for Layer Cache Efficiency
+
+**User Story:** As a developer, I want the container image to build quickly on repeated invocations, so that I don't wait minutes for a rebuild when nothing has changed.
+
+#### Acceptance Criteria
+
+1. THE `DockerfileBuilder` SHALL place all `RUN` installation steps (base packages, agent installs, manifest write) **before** the `CMD` instruction in the generated Dockerfile.
+2. THE `CMD ["/usr/sbin/sshd", "-D"]` instruction SHALL always be the **last** instruction in the generated Dockerfile.
+3. THE `DockerfileBuilder.NewDockerfileBuilder()` constructor SHALL NOT append the `CMD` instruction. Instead, a separate `Finalize()` method SHALL append it.
+4. THE caller (`cmd/root.go`) SHALL call `Finalize()` only after all agent `Install()` steps and the manifest `RUN` step have been appended to the builder.
+5. Agent modules SHALL append only `RUN` (and optionally `ENV`, `COPY`) instructions via `Install()` — never `CMD` or `FROM`.
+
+> **Rationale:** Docker's layer cache is sequential. Any instruction that changes invalidates all layers below it. Placing `CMD` before agent `RUN` steps means every agent installation step runs uncached on every build, even when the agent configuration has not changed. With `CMD` last, all `RUN` layers are stable and cached after the first build, reducing subsequent build times from minutes to seconds.

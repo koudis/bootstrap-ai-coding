@@ -82,6 +82,9 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 	containerName = constants.ContainerNamePrefix + sanitizeClaude(dirName)
 	imageTag := containerName + ":latest"
 
+	// CMD must be the last instruction — call Finalize() before Build().
+	builder.Finalize()
+
 	spec := docker.ContainerSpec{
 		Name:       containerName,
 		ImageTag:   imageTag,

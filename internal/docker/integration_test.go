@@ -24,6 +24,50 @@ import (
 )
 
 // ----------------------------------------------------------------------------
+// TestMain — integration suite precondition check
+// ----------------------------------------------------------------------------
+
+// TestMain enforces that the base image is NOT present in the local Docker
+// image store before the integration suite runs. The suite includes
+// TestFindConflictingUserPullsImageIfAbsent, which specifically tests the
+// pull-before-inspect path. If the image is already cached, that test would
+// never exercise the pull logic and its result would be meaningless.
+//
+// If ubuntu:26.04 is present, the suite fails immediately with a clear
+// message rather than producing a false-positive result.
+//
+// To fix: docker rmi ubuntu:26.04
+func TestMain(m *testing.M) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		// Docker not available — individual tests will skip themselves.
+		os.Exit(m.Run())
+	}
+
+	ctx := context.Background()
+	client, err := docker.NewClient()
+	if err != nil {
+		// Daemon unreachable — individual tests will handle this.
+		os.Exit(m.Run())
+	}
+
+	_, _, err = client.ImageInspectWithRaw(ctx, constants.BaseContainerImage)
+	if err == nil {
+		// Image is present — fail loudly so the developer knows to remove it.
+		fmt.Fprintf(os.Stderr,
+			"\nINTEGRATION TEST ENVIRONMENT ERROR\n"+
+				"The base image %q is already present in the local Docker image store.\n"+
+				"The integration suite requires a clean environment so that\n"+
+				"TestFindConflictingUserPullsImageIfAbsent can verify the auto-pull path.\n\n"+
+				"Fix: docker rmi %s\n\n",
+			constants.BaseContainerImage, constants.BaseContainerImage,
+		)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
+
+// ----------------------------------------------------------------------------
 // Helper: setupContainer
 // ----------------------------------------------------------------------------
 
@@ -90,6 +134,9 @@ func setupContainer(t *testing.T) (containerName string, sshPort int, cleanup fu
 	// Derive a deterministic container name from the temp dir name.
 	containerName = constants.ContainerNamePrefix + sanitize(dirName)
 	imageTag := containerName + ":latest"
+
+	// CMD must be the last instruction — call Finalize() before Build().
+	builder.Finalize()
 
 	spec := docker.ContainerSpec{
 		Name:       containerName,
@@ -382,6 +429,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			hostKeyPriv, hostKeyPub,
 			strategy, conflictingUser,
 		)
+		builder.Finalize()
 		spec := docker.ContainerSpec{
 			Name:       containerName,
 			ImageTag:   imageTag,
@@ -698,4 +746,75 @@ func TestBuildImageTimeoutEnforced(t *testing.T) {
 	require.Error(t, err, "BuildImageWithTimeout must return an error when the build exceeds the timeout")
 	require.Contains(t, err.Error(), "timed out",
 		"error message must mention 'timed out'; got: %v", err)
+}
+
+// ----------------------------------------------------------------------------
+// TestFindConflictingUserPullsImageIfAbsent
+// Validates: Req 10a.1 — FindConflictingUser must succeed even when the base
+// image is not present in the local Docker image store.
+// ----------------------------------------------------------------------------
+
+func TestFindConflictingUserPullsImageIfAbsent(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+
+	client, err := docker.NewClient()
+	require.NoError(t, err, "connecting to Docker daemon")
+
+	// Remove the base image from the local store so we can verify that
+	// FindConflictingUser pulls it automatically.
+	// We re-tag it first so we can restore it cheaply after the test.
+	const tempTag = "bac-test-backup:findconflict"
+	_ = tagImage(ctx, client, constants.BaseContainerImage, tempTag)
+
+	// Remove the base image (ignore error — it may not be present at all).
+	images, _ := client.ImageList(ctx, dockerimage.ListOptions{})
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if tag == constants.BaseContainerImage {
+				_, _ = client.ImageRemove(ctx, img.ID, dockerimage.RemoveOptions{Force: true})
+				break
+			}
+		}
+	}
+
+	// Restore the image after the test so subsequent tests don't need to re-pull.
+	t.Cleanup(func() {
+		cleanCtx := context.Background()
+		_ = tagImage(cleanCtx, client, tempTag, constants.BaseContainerImage)
+		_, _ = client.ImageRemove(cleanCtx, tempTag, dockerimage.RemoveOptions{Force: true})
+	})
+
+	// FindConflictingUser must succeed even though the image is not local.
+	// It should pull the image automatically and then inspect /etc/passwd.
+	u, err := user.Current()
+	require.NoError(t, err)
+	uid, err := strconv.Atoi(u.Uid)
+	require.NoError(t, err)
+	gid, err := strconv.Atoi(u.Gid)
+	require.NoError(t, err)
+
+	// This must not return an error like "No such image".
+	result, err := docker.FindConflictingUser(ctx, client, uid, gid)
+	require.NoError(t, err,
+		"FindConflictingUser must succeed even when the base image is not cached locally")
+
+	// result may be nil (no conflict) or non-nil (conflict found) — both are valid.
+	// The important thing is that no error was returned.
+	_ = result
+
+	// Verify the image is now present locally (was pulled by FindConflictingUser).
+	_, _, err = client.ImageInspectWithRaw(ctx, constants.BaseContainerImage)
+	require.NoError(t, err,
+		"base image should be present locally after FindConflictingUser pulls it")
+}
+
+// tagImage re-tags src as dst using docker tag via the CLI.
+// Used in tests to cheaply backup/restore images without re-pulling.
+func tagImage(ctx context.Context, _ *docker.Client, src, dst string) error {
+	cmd := exec.CommandContext(ctx, "docker", "tag", src, dst)
+	return cmd.Run()
 }

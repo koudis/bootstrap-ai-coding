@@ -107,6 +107,7 @@ func TestPropertyDockerfileSSHServerAndContainerUser(t *testing.T) {
 		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
 
 		b := newCreateBuilder(uid, gid)
+		b.Finalize() // CMD must be appended before inspecting the full Dockerfile
 		content := b.Build()
 
 		// Must install openssh-server

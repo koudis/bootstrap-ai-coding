@@ -547,6 +547,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		}
 		manifestJSON, _ := json.Marshal(enabledIDs)
 		b.Run(fmt.Sprintf("echo %q > %s", string(manifestJSON), constants.ManifestFilePath))
+		b.Finalize() // CMD must be last — after all agent RUN steps
 		labels["bac.manifest"] = string(manifestJSON)
 
 		spec := dockerpkg.ContainerSpec{

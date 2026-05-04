@@ -601,6 +601,61 @@ The module path is `github.com/koudis/bootstrap-ai-coding`. All glossary-derived
     - For any Dockerfile containing at least one `RUN` instruction, a `BuildImageWithTimeout` call with `verbose == true` SHALL result in at least one non-empty `stream` line being written to stdout
     - _Requirements: Req 20.2, Req 20.3_
 
+- [x] 28. Fix Dockerfile instruction ordering for Docker layer cache efficiency (Req 21)
+  - [x] 28.1 Add `Finalize()` method to `DockerfileBuilder` in `internal/docker/builder.go`
+    - Remove the `CMD ["/usr/sbin/sshd", "-D"]` line from `NewDockerfileBuilder` constructor
+    - Add `Finalize()` method that appends `CMD ["/usr/sbin/sshd", "-D"]` as the last instruction
+    - Add a comment in the constructor explaining that `Finalize()` must be called after all agent `Install()` steps
+    - _Requirements: Req 21.1–21.5_
+
+  - [x] 28.2 Update `internal/cmd/root.go` to call `Finalize()` after agent steps
+    - After the loop that calls `a.Install(b)` for each enabled agent and after the manifest `RUN` step, call `b.Finalize()` before passing `b.Build()` to `ContainerSpec`
+    - _Requirements: Req 21.4_
+
+  - [x] 28.3 Update all integration test setup functions to call `Finalize()` before `Build()`
+    - `internal/docker/integration_test.go` — `setupContainer` (two call sites: main helper and `TestSSHHostKeyStableAcrossRebuild`)
+    - `internal/agents/claude/integration_test.go` — `setupContainerWithClaude`
+    - `internal/agents/augment/integration_test.go` — `setupContainerWithAugment`
+    - Each must call `builder.Finalize()` immediately before `builder.Build()` so the generated Dockerfile has `CMD` as its last instruction; without this the container exits immediately after start
+    - _Requirements: Req 21.2_
+
+  - [x] 28.4 Update property test `TestPropertyDockerfileSSHServerAndContainerUser` to call `Finalize()` before asserting `CMD` presence
+    - In `internal/docker/builder_test.go`, call `b.Finalize()` before `b.Build()` in the test that asserts `CMD ["/usr/sbin/sshd", "-D"]` is present
+    - _Requirements: Req 21.2_
+
+  - [x] 28.5 Update requirements and design documents
+    - Add Requirement 21 to `requirements-core.md`: Dockerfile instruction ordering for layer cache efficiency (5 acceptance criteria + rationale)
+    - Update `design-architecture.md` DockerfileBuilder API section: add `Finalize()` to the method list and add the Dockerfile instruction order diagram showing all layers in correct order with cache annotations
+    - _Requirements: Req 21_
+
+- [x] 29. Fix `FindConflictingUser` to pull base image if not present locally (Req 10a.1)
+  - [x] 29.1 Add `ImagePull` method to `internal/docker/client.go`
+    - Add `ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)` delegating to `c.inner.ImagePull`
+    - _Requirements: Req 10a.1_
+
+  - [x] 29.2 Update `FindConflictingUser` in `internal/docker/client.go` to pull before inspect
+    - Before `ContainerCreate`, call `client.ImageInspectWithRaw` to check if the base image is present locally
+    - If not present (error returned), print `"Pulling base image <name>..."` to stdout and call `client.ImagePull`, draining the pull stream to completion
+    - If the pull fails, return a descriptive error
+    - Only then proceed to `ContainerCreate`
+    - _Requirements: Req 10a.1_
+
+  - [x] 29.3 Write integration test `TestFindConflictingUserPullsImageIfAbsent`
+    - `//go:build integration`; re-tag the base image as a backup, remove it from the local store, call `FindConflictingUser`, assert no error is returned, assert the image is now present locally (was pulled), restore the original tag in `t.Cleanup`
+    - _Requirements: Req 10a.1_
+
+- [x] 30. Enforce integration test environment precondition: base image must not be present
+  - [x] 30.1 Add `TestMain` to `internal/docker/integration_test.go`
+    - If Docker is available and the daemon is reachable, call `client.ImageInspectWithRaw` for `constants.BaseContainerImage`
+    - If the image IS present, print a clear error to stderr identifying the image, explaining why it must be absent (to allow `TestFindConflictingUserPullsImageIfAbsent` to test the auto-pull path), and providing the fix command (`docker rmi ubuntu:26.04`), then call `os.Exit(1)`
+    - If Docker is unavailable or the daemon is unreachable, proceed normally (individual tests will skip themselves)
+    - _Requirements: integration test environment hygiene_
+
+  - [x] 30.2 Update steering and design documents
+    - Update `.kiro/steering/testing.md`: add "Environment precondition" subsection under Integration Tests explaining the `TestMain` check, the error message format, and the correct run command (`go test -tags integration -timeout 30m ./...`)
+    - Update `.kiro/specs/bootstrap-ai-coding/design-properties.md`: add environment precondition block to the Integration Tests section, add `TestBuildImageTimeoutEnforced` and `TestFindConflictingUserPullsImageIfAbsent` to the integration test table
+    - _Requirements: integration test environment hygiene_
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP
@@ -611,5 +666,6 @@ The module path is `github.com/koudis/bootstrap-ai-coding`. All glossary-derived
 - The `internal/agents/claude` package must not import `cmd`, `naming`, `ssh`, `credentials`, `datadir`, `portfinder`, or `docker/runner`
 - `main.go` is the only file that blank-imports agent modules
 - Flag combination validation (CLI-1–CLI-6) is always the **first** check in `cmd/root.go`, before root UID check or Docker checks
+- Integration tests in `internal/docker` require `ubuntu:26.04` to NOT be present locally before the suite starts; `TestMain` enforces this and fails with a clear error if the image is cached
 
 

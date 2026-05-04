@@ -753,6 +753,25 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
 
 Gated by `//go:build integration`. Require a running Docker daemon.
 
+#### Environment precondition: base image must NOT be present
+
+The `internal/docker` integration suite enforces via `TestMain` that `constants.BaseContainerImage` is **not** present in the local Docker image store when the suite starts. `TestFindConflictingUserPullsImageIfAbsent` specifically tests the auto-pull path — if the image is already cached, that test would never exercise the pull logic and its result would be a false positive.
+
+`TestMain` fails the entire suite immediately if the image is present:
+
+```
+INTEGRATION TEST ENVIRONMENT ERROR
+The base image "ubuntu:26.04" is already present in the local Docker image store.
+Fix: docker rmi ubuntu:26.04
+```
+
+**Before running integration tests:**
+
+```bash
+docker rmi ubuntu:26.04
+go test -tags integration -timeout 30m ./...
+```
+
 | Test | Validates |
 |---|---|
 | `TestContainerStartsAndSSHConnects` | Req 3.3, 4.3 |
@@ -764,6 +783,8 @@ Gated by `//go:build integration`. Require a running Docker daemon.
 | `TestPurgeRemovesContainersAndImages` | Req 16.2, 16.4 |
 | `TestKnownHostsEntriesLifecycle` | Req 18.1–18.2, 18.7 |
 | `TestSSHConfigEntryLifecycle` | Req 19.1–19.2, 19.7 |
+| `TestBuildImageTimeoutEnforced` | Req 14.7 |
+| `TestFindConflictingUserPullsImageIfAbsent` | Req 10a.1 |
 | `TestClaudeAvailableInContainer` | Agent Req CC-2.3 |
 | `TestClaudeHealthCheck` | Agent Req CC-5 |
 | `TestAugmentAvailableInContainer` | Agent Req AC-2.3 |

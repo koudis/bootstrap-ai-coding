@@ -224,7 +224,7 @@ const (
     SSHDirPerm                  = 0o700
     KnownHostsFile              = "~/.ssh/known_hosts"
     SSHConfigFile               = "~/.ssh/config"
-    ImageBuildTimeout           = 5 * time.Minute  // Image_Build_Timeout glossary term
+    ImageBuildTimeout           = 8 * time.Minute  // Image_Build_Timeout glossary term
 )
 ```
 
@@ -304,8 +304,27 @@ func (b *DockerfileBuilder) Run(cmd string)
 func (b *DockerfileBuilder) Env(k, v string)
 func (b *DockerfileBuilder) Copy(src, dst string)
 func (b *DockerfileBuilder) Cmd(cmd string)
+func (b *DockerfileBuilder) Finalize()        // appends CMD — must be called last, after all agent Install() steps
 func (b *DockerfileBuilder) Build() string
 func (b *DockerfileBuilder) Lines() []string
+```
+
+**Dockerfile instruction order (Req 21):** `NewDockerfileBuilder` seeds the base layers (FROM, openssh-server, Container_User, sudo, SSH keys, sshd_config, /run/sshd) but does **not** append `CMD`. The caller appends agent steps via `Install()`, then the manifest `RUN`, then calls `Finalize()` to append `CMD` as the final instruction. This ensures all `RUN` layers are ordered before `CMD`, keeping them in Docker's layer cache across rebuilds.
+
+```
+FROM ubuntu:26.04
+RUN apt-get install openssh-server sudo     ← base, stable, cached
+RUN groupadd/useradd (or usermod rename)    ← stable per project, cached
+RUN sudoers                                 ← stable, cached
+RUN SSH authorized_keys                     ← stable per user key, cached
+RUN SSH host key injection                  ← stable per project, cached
+RUN sshd_config hardening                   ← stable, cached
+RUN mkdir /run/sshd                         ← stable, cached
+RUN apt-get install curl ca-certificates    ← agent step, cached after first build
+RUN nodesource setup + nodejs               ← agent step, cached after first build
+RUN npm install -g @augmentcode/auggie      ← agent step, cached after first build
+RUN echo manifest > /bac-manifest.json     ← stable when agents unchanged, cached
+CMD ["/usr/sbin/sshd", "-D"]               ← always last (Req 21.2)
 ```
 
 ### Base Image User Inspection

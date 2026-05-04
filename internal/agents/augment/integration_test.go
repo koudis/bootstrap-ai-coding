@@ -82,6 +82,9 @@ func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int,
 	containerName = constants.ContainerNamePrefix + sanitizeAugment(dirName)
 	imageTag := containerName + ":latest"
 
+	// CMD must be the last instruction — call Finalize() before Build().
+	builder.Finalize()
+
 	spec := docker.ContainerSpec{
 		Name:       containerName,
 		ImageTag:   imageTag,
@@ -101,7 +104,7 @@ func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int,
 		HostGID: gid,
 	}
 
-	_, err = docker.BuildImage(ctx, client, spec, false)
+	_, err = docker.BuildImage(ctx, client, spec, true)
 	require.NoError(t, err, "building container image with augment")
 
 	_, err = docker.CreateContainer(ctx, client, spec)

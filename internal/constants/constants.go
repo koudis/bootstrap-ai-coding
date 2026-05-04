@@ -97,10 +97,10 @@ const (
 )
 
 // ImageBuildTimeout is the maximum time allowed for a Docker image build.
-// Building installs Node.js and npm packages, so 5 minutes is sufficient
+// Building installs Node.js and npm packages, so 8 minutes is sufficient
 // for a warm cache and bounded — a hung RUN step will be cancelled rather
 // than blocking forever.
-const ImageBuildTimeout = 5 * time.Minute
+const ImageBuildTimeout = 8 * time.Minute
 
 // Version is the build version, injected at link time via:
 //

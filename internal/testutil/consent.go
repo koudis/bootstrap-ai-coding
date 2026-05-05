@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/docker/docker/api/types/image"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
@@ -64,5 +65,18 @@ func EnsureBaseImageAbsent() error {
 	fmt.Fprintf(os.Stderr, "Removing cached base image %s to ensure clean test environment\n", constants.BaseContainerImage)
 
 	_, err = client.ImageRemove(ctx, constants.BaseContainerImage, image.RemoveOptions{Force: true})
+	if err != nil && isImageNotFound(err) {
+		// Another test package may have removed it concurrently — goal achieved.
+		return nil
+	}
 	return err
+}
+
+// isImageNotFound returns true if the error indicates the image does not exist.
+func isImageNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "No such image") || strings.Contains(msg, "not found")
 }

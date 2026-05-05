@@ -32,6 +32,16 @@ func (a *claudeAgent) Install(b *docker.DockerfileBuilder) {
 		b.MarkNodeInstalled()
 	}
 	b.Run("npm install -g --no-fund --no-audit @anthropic-ai/claude-code")
+
+	// Symlink ~/.claude.json into the credential mount directory so that a single
+	// bind-mount on ~/.claude/ persists both OAuth tokens (.credentials.json) and
+	// onboarding state (claude.json). Without this, Claude Code triggers the full
+	// login/onboarding flow on every container start.
+	b.Run(fmt.Sprintf(
+		"ln -sf %s/claude.json %s/.claude.json",
+		filepath.Join(constants.ContainerUserHome, ".claude"),
+		constants.ContainerUserHome,
+	))
 }
 
 func (a *claudeAgent) CredentialStorePath() string {
@@ -53,6 +63,40 @@ func (a *claudeAgent) HasCredentials(storePath string) (bool, error) {
 		return false, fmt.Errorf("checking claude credentials: %w", err)
 	}
 	return true, nil
+}
+
+// PrepareCredentials copies ~/.claude.json into the credential store as
+// claude.json (if it exists and the destination is absent or older).
+// Inside the container a symlink at ~/.claude.json points to this file,
+// so the bind-mount on ~/.claude/ covers both OAuth tokens and onboarding state.
+func (a *claudeAgent) PrepareCredentials(storePath string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil // best-effort; skip if we can't determine home
+	}
+	src := filepath.Join(home, ".claude.json")
+	dst := filepath.Join(storePath, "claude.json")
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		// Source doesn't exist — nothing to sync (first-time user).
+		return nil
+	}
+
+	// Only copy if destination is missing or older than source.
+	dstInfo, err := os.Stat(dst)
+	if err == nil && !dstInfo.ModTime().Before(srcInfo.ModTime()) {
+		return nil // destination is up-to-date
+	}
+
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", src, err)
+	}
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", dst, err)
+	}
+	return nil
 }
 
 func (a *claudeAgent) HealthCheck(ctx context.Context, containerID string) error {

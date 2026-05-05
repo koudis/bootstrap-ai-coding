@@ -320,12 +320,48 @@ RUN SSH authorized_keys                     ← stable per user key, cached
 RUN SSH host key injection                  ← stable per project, cached
 RUN sshd_config hardening                   ← stable, cached
 RUN mkdir /run/sshd                         ← stable, cached
+RUN apt-get install dbus-x11 gnome-keyring libsecret-1-0  ← keyring (CC-7), cached
+RUN install /etc/profile.d/dbus-keyring.sh  ← keyring startup script, cached
 RUN apt-get install curl ca-certificates    ← agent step, cached after first build
 RUN nodesource setup + nodejs               ← agent step, cached after first build
 RUN npm install -g @augmentcode/auggie      ← agent step, cached after first build
 RUN echo manifest > /bac-manifest.json     ← stable when agents unchanged, cached
 CMD ["/usr/sbin/sshd", "-D"]               ← always last (Req 21.2)
 ```
+
+### Headless Keyring (D-Bus + gnome-keyring-daemon)
+
+The container runs a headless `gnome-keyring-daemon` so that tools using `libsecret` / D-Bus Secret Service API (Claude Code, VS Code extensions) can store and retrieve OAuth tokens without a graphical desktop.
+
+**Installed in the base layer** (inside `NewDockerfileBuilder`), not in individual agent modules, because multiple agents and IDE extensions benefit from it.
+
+**Packages installed:**
+- `dbus-x11` — provides `dbus-launch` for starting a session bus
+- `gnome-keyring` — Secret Service provider
+- `libsecret-1-0` — client library (used by Node.js `keytar` / `libsecret` bindings)
+
+**Startup mechanism:**
+A shell profile script (`/etc/profile.d/dbus-keyring.sh`) is installed that:
+1. Starts a D-Bus session bus via `dbus-launch` (if not already running)
+2. Exports `DBUS_SESSION_BUS_ADDRESS`
+3. Unlocks `gnome-keyring-daemon` with an empty password via stdin pipe
+
+```sh
+#!/bin/sh
+# /etc/profile.d/dbus-keyring.sh — start D-Bus + gnome-keyring for headless SSH sessions
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    eval $(dbus-launch --sh-syntax)
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+# Unlock the default keyring with an empty password
+echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null
+```
+
+This script runs on every SSH login (interactive shells source `/etc/profile.d/*.sh`). The keyring is per-session and uses an empty password, which is acceptable because the container is single-user and access is already gated by SSH key authentication.
+
+**Validates: CC-7**
+
+---
 
 ### Base Image User Inspection
 

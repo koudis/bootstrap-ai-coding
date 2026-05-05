@@ -84,3 +84,4 @@ import (
 - Manifest file inside image: `/bac-manifest.json` (constants.ManifestFilePath) — lists enabled agent IDs for rebuild detection
 - Default agents: `claude-code,augment-code` (constants.DefaultAgents)
 - File permissions: Tool_Data_Dir `0700` (constants.ToolDataDirPerm), all files within `0600` (constants.ToolDataFilePerm)
+- Headless keyring: D-Bus session bus + gnome-keyring-daemon started via `/etc/profile.d/dbus-keyring.sh` on SSH login — enables libsecret-based credential storage (CC-7)

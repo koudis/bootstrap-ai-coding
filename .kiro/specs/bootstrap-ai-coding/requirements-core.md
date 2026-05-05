@@ -154,8 +154,9 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 2. THE Container_Image SHALL include installation steps only for Enabled_Agents; agents not in the Enabled_Agents set SHALL NOT be installed in the image.
 3. WHEN a Container is started, THE CLI SHALL mount each Enabled_Agent's Credential_Store from the Host as a Credential_Volume at the path declared by that Agent via the Agent_Interface.
 4. WHEN the Credential_Store directory for an Enabled_Agent does not exist on the Host, THE CLI SHALL create it before starting the Container.
-5. WHEN a Container is started and the Credential_Store for an Enabled_Agent contains no existing authentication tokens, THE CLI SHALL print a message to stdout identifying that Agent by name and instructing the user to authenticate it inside the Container.
-6. Credentials written by an Agent inside the Container SHALL be immediately persisted to the Host Credential_Store via the bind-mount, and SHALL be available in future Sessions without re-authentication.
+5. IF an Enabled_Agent implements the optional `CredentialPreparer` interface, THE CLI SHALL call `PrepareCredentials(storePath)` after ensuring the Credential_Store directory exists and before starting the Container. This allows agents to synchronise external state (e.g. onboarding files stored outside the Credential_Store) into the mounted directory.
+6. WHEN a Container is started and the Credential_Store for an Enabled_Agent contains no existing authentication tokens, THE CLI SHALL print a message to stdout identifying that Agent by name and instructing the user to authenticate it inside the Container.
+7. Credentials written by an Agent inside the Container SHALL be immediately persisted to the Host Credential_Store via the bind-mount, and SHALL be available in future Sessions without re-authentication.
 
 ---
 
@@ -250,10 +251,11 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 1. WHEN the CLI starts a Container and no existing Container_Image is found, THE CLI SHALL build the Container_Image automatically before starting the Container.
 2. THE CLI SHALL store a manifest file inside the Container_Image (at `/bac-manifest.json`) listing the Enabled_Agents used to build it.
 3. WHEN the CLI starts a Container and the Enabled_Agents set does not match the manifest in the existing Container_Image, THE CLI SHALL stop, print a message to stdout informing the user that the agent configuration has changed, and instruct them to run with `--rebuild` to update the image.
-4. THE CLI SHALL support a `--rebuild` flag that forces a full Container_Image rebuild regardless of the existing manifest.
-5. WHEN a rebuild is triggered (automatically or via `--rebuild`), THE CLI SHALL print a message to stdout indicating that the image is being built.
-6. IF the image build fails, THE CLI SHALL print the build output to stderr and exit with a non-zero exit code.
-7. THE CLI SHALL enforce a maximum build duration of the Image_Build_Timeout. IF the build exceeds this deadline, THE CLI SHALL cancel the build, print a descriptive error message to stderr identifying the timeout, and exit with a non-zero exit code.
+4. THE CLI SHALL support a `--rebuild` flag that forces a full Container_Image rebuild regardless of the existing manifest. WHEN `--rebuild` is used, THE CLI SHALL disable the Docker layer cache (`NoCache`) so that all Dockerfile steps are re-executed from scratch.
+5. WHEN `--rebuild` is used and the Container is already running, THE CLI SHALL stop and remove the existing Container before creating a new one from the rebuilt image.
+6. WHEN a rebuild is triggered (automatically or via `--rebuild`), THE CLI SHALL print a message to stdout indicating that the image is being built.
+7. IF the image build fails, THE CLI SHALL print the build output to stderr and exit with a non-zero exit code.
+8. THE CLI SHALL enforce a maximum build duration of the Image_Build_Timeout. IF the build exceeds this deadline, THE CLI SHALL cancel the build, print a descriptive error message to stderr identifying the timeout, and exit with a non-zero exit code.
 
 ---
 

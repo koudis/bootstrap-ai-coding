@@ -319,8 +319,8 @@ func TestClaudeInstallNodeAlreadyInstalled(t *testing.T) {
 	require.Contains(t, content, "curl ca-certificates git",
 		"must always install curl, ca-certificates, git")
 
-	// Should have added exactly 2 lines (apt-get prereqs + npm install)
+	// Should have added exactly 3 lines (apt-get prereqs + npm install + symlink)
 	linesAfter := len(b.Lines())
-	require.Equal(t, linesBefore+2, linesAfter,
-		"must add exactly 2 RUN steps when Node.js is already installed (prereqs + npm)")
+	require.Equal(t, linesBefore+3, linesAfter,
+		"must add exactly 3 RUN steps when Node.js is already installed (prereqs + npm + symlink)")
 }

@@ -469,6 +469,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		if err := credentials.EnsureDir(resolved); err != nil {
 			return fmt.Errorf("ensuring credential dir for %s: %w", a.ID(), err)
 		}
+		// If the agent implements CredentialPreparer, let it sync external
+		// state into the credential store before we mount it.
+		if prep, ok := a.(agent.CredentialPreparer); ok {
+			if err := prep.PrepareCredentials(resolved); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: preparing credentials for %s: %v\n", a.ID(), err)
+			}
+		}
 		hasCreds, err := a.HasCredentials(resolved)
 		if err != nil {
 			return fmt.Errorf("checking credentials for %s: %w", a.ID(), err)
@@ -557,6 +564,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			Labels:     labels,
 			HostUID:    uid,
 			HostGID:    gid,
+			NoCache:    flagRebuild,
 		}
 
 		fmt.Println("Building image...")
@@ -572,16 +580,23 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return err
 	}
 	if info != nil && info.State != nil && info.State.Running {
-		// Sync known_hosts even when reconnecting to an already-running container (Req 18.1).
-		if err := sshpkg.SyncKnownHosts(sshPort, hostKeyPub, flagNoUpdateKnownHosts); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: syncing known_hosts: %v\n", err)
+		if !flagRebuild {
+			// Sync known_hosts even when reconnecting to an already-running container (Req 18.1).
+			if err := sshpkg.SyncKnownHosts(sshPort, hostKeyPub, flagNoUpdateKnownHosts); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: syncing known_hosts: %v\n", err)
+			}
+			// Sync SSH config entry (Req 19.1).
+			if err := sshpkg.SyncSSHConfig(containerName, sshPort, flagNoUpdateSSHConfig); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: syncing SSH config: %v\n", err)
+			}
+			printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
+			return nil
 		}
-		// Sync SSH config entry (Req 19.1).
-		if err := sshpkg.SyncSSHConfig(containerName, sshPort, flagNoUpdateSSHConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: syncing SSH config: %v\n", err)
-		}
-		printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
-		return nil
+		// --rebuild: stop the running container so it gets recreated from the new image.
+		fmt.Println("Stopping existing container for rebuild...")
+		_ = dockerpkg.StopContainer(ctx, c, containerName)
+		_ = dockerpkg.RemoveContainer(ctx, c, containerName)
+		info = nil
 	}
 
 	if info != nil {

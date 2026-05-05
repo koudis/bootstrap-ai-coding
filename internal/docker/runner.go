@@ -40,6 +40,7 @@ type ContainerSpec struct {
 	Labels     map[string]string // Docker labels for identification
 	HostUID    int               // Host user UID (passed as build arg for dev user)
 	HostGID    int               // Host user GID (passed as build arg for dev user)
+	NoCache    bool              // When true, disable Docker layer cache during image build
 }
 
 func buildContextFromDockerfile(dockerfile string) (io.Reader, error) {
@@ -79,6 +80,7 @@ func BuildImageWithTimeout(ctx context.Context, c *Client, spec ContainerSpec, t
 		Tags:       []string{spec.ImageTag},
 		Dockerfile: "Dockerfile",
 		Remove:     true,
+		NoCache:    spec.NoCache,
 		Labels:     spec.Labels,
 	})
 	if err != nil {

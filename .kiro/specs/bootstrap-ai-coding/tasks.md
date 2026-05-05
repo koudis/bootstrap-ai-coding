@@ -67,3 +67,24 @@ When both Claude Code and Augment Code are enabled (the default), both agents in
   - [x] 5.1 Run `go build ./...` — must compile cleanly
   - [x] 5.2 Run `go vet -tags integration ./...` — must pass with no warnings
   - [x] 5.3 Run `go test ./...` (unit + PBT only) — must pass (no regressions)
+
+### Headless keyring for credential persistence (CC-7)
+
+Install D-Bus and gnome-keyring-daemon in the base container image so that tools using libsecret (Claude Code, VS Code extensions) can store and refresh OAuth tokens without a graphical desktop.
+
+- [x] 7. Add headless keyring support to the base container image
+  - [x] 7.1 Add keyring constant to `internal/constants/constants.go`
+    - Add `KeyringProfileScript = "/etc/profile.d/dbus-keyring.sh"` constant
+  - [x] 7.2 Update `DockerfileBuilder` in `internal/docker/builder.go` to install keyring packages and startup script
+    - After the `mkdir -p /run/sshd` step, add a RUN step that installs `dbus-x11`, `gnome-keyring`, and `libsecret-1-0`
+    - Add a RUN step that creates `/etc/profile.d/dbus-keyring.sh` with the startup script content
+    - The script must: start dbus-launch if `DBUS_SESSION_BUS_ADDRESS` is unset, export it, then unlock gnome-keyring-daemon with an empty password
+    - Make the script executable (chmod +x)
+  - [x] 7.3 Add unit/PBT tests for keyring in `internal/docker/builder_test.go`
+    - Property 52: Verify the generated Dockerfile contains `dbus-x11`, `gnome-keyring`, and `libsecret-1-0` installation for any UID/GID
+    - Property 53: Verify the generated Dockerfile contains the profile.d script creation at `constants.KeyringProfileScript` with `dbus-launch`, `gnome-keyring-daemon --unlock`, and `chmod +x`
+    - Unit test: Verify keyring is present in UserStrategyRename as well
+  - [x] 7.4 Verify build and tests pass
+    - Run `go build ./...` — must compile cleanly
+    - Run `go vet ./...` — must pass
+    - Run `go test ./...` — all unit and PBT tests must pass

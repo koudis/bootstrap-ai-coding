@@ -699,3 +699,123 @@ The `TestAFindConflictingUserPullsImageIfAbsent` test (in `internal/docker`) is 
 | `--stop-and-remove`, container not found | Docker inspect | Informational message → stdout, exit 0 |
 | Container already running | Docker inspect before create | Session summary → stdout, exit 0 |
 | `--purge` user declines confirmation | Confirmation prompt | Exit 0, nothing deleted |
+
+---
+
+## Semantic Refactoring (Req 22–27)
+
+Internal code quality improvements: consolidate duplicated helpers, fix misplaced responsibilities, clarify intent. No user-facing behaviour changes.
+
+---
+
+### PathUtil Package (Req 22)
+
+New package `internal/pathutil` with zero internal dependencies (only stdlib):
+
+```go
+package pathutil
+
+import (
+    "os"
+    "path/filepath"
+)
+
+// ExpandHome expands a leading "~/" to the user's home directory.
+func ExpandHome(p string) string {
+    if len(p) >= 2 && p[:2] == "~/" {
+        home, _ := os.UserHomeDir()
+        return filepath.Join(home, p[2:])
+    }
+    return p
+}
+```
+
+All packages that currently define their own `expandHome` (`naming`, `ssh`, `credentials`, `datadir`, `cmd`) remove the local copy and import `pathutil.ExpandHome`. Tests in `cmd_test` that reference `cmd.ExpandHome` switch to `pathutil.ExpandHome`.
+
+**Validates: Req 22**
+
+---
+
+### ExecInContainer Client Parameter (Req 23)
+
+The `Agent.HealthCheck` interface and `docker.ExecInContainer` function both gain a `*docker.Client` parameter:
+
+```go
+// Agent interface change:
+HealthCheck(ctx context.Context, c *docker.Client, containerID string) error
+
+// ExecInContainer signature change:
+func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []string) (int, error)
+```
+
+Call chain: `cmd/root.go` (has `dockerClient`) → `agent.HealthCheck(ctx, dockerClient, containerID)` → `docker.ExecInContainer(ctx, dockerClient, containerID, cmd)`.
+
+**Validates: Req 23**
+
+---
+
+### Consolidated Flag Validation (Req 24)
+
+Replace 7 individual `cmd.Flags().Changed(...)` blocks with:
+
+```go
+if mode == ModeStop || mode == ModePurge {
+    var changed []string
+    cmd.Flags().Visit(func(f *pflag.Flag) {
+        changed = append(changed, f.Name)
+    })
+    if err := ValidateStartOnlyFlags(mode, changed); err != nil {
+        return err
+    }
+}
+```
+
+Dead code removed: private `stringSlicesEqual` and `expandHome` wrappers. Exported `StringSlicesEqual` remains.
+
+**Validates: Req 24**
+
+---
+
+### Split ListBACImages (Req 25)
+
+```go
+// ListBACImages returns images with the "bac.managed=true" label only.
+func ListBACImages(ctx context.Context, c *Client) ([]image.Summary, error)
+
+// ListBACImagesWithFallback returns labeled images, falling back to a tag-prefix
+// scan for images built before labels were introduced (pre-label compatibility).
+// This fallback can be removed once all users have rebuilt their images with --rebuild.
+func ListBACImagesWithFallback(ctx context.Context, c *Client) ([]image.Summary, error)
+```
+
+`runPurge` uses `ListBACImagesWithFallback`. Other callers use `ListBACImages`.
+
+**Validates: Req 25**
+
+---
+
+### HostBindIP Constant (Req 26)
+
+```go
+// HostBindIP is the IP address the container's SSH port is bound to on the host.
+HostBindIP = "127.0.0.1"
+```
+
+Used by `CreateContainer` (port binding) and `WaitForSSH` (TCP dial target). Decouples the bind address from `KnownHostsPatterns` which remains unchanged for known_hosts entry generation.
+
+**Validates: Req 26**
+
+---
+
+### CredentialPreparer File Split (Req 27)
+
+```
+internal/agent/
+    agent.go      # Agent interface only (6 methods)
+    preparer.go   # CredentialPreparer optional interface
+    registry.go   # Registry functions
+```
+
+Pure file reorganization. No functional change.
+
+**Validates: Req 27**

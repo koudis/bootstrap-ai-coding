@@ -155,7 +155,7 @@ func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string
 	sshPort := nat.Port(fmt.Sprintf("%d/tcp", constants.ContainerSSHPort))
 	portBindings := nat.PortMap{
 		sshPort: []nat.PortBinding{
-			{HostIP: constants.KnownHostsPatterns[1], HostPort: fmt.Sprintf("%d", spec.SSHPort)},
+			{HostIP: constants.HostBindIP, HostPort: fmt.Sprintf("%d", spec.SSHPort)},
 		},
 	}
 	exposedPorts := nat.PortSet{sshPort: struct{}{}}
@@ -283,13 +283,24 @@ func ListBACContainerNames(ctx context.Context, c *Client) ([]string, error) {
 	return names, nil
 }
 
-// ListBACImages returns all images managed by this tool.
+// ListBACImages returns images with the "bac.managed=true" label only.
 func ListBACImages(ctx context.Context, c *Client) ([]image.Summary, error) {
 	images, err := c.ImageList(ctx, image.ListOptions{
 		Filters: bacLabelFilter(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing bac images: %w", err)
+	}
+	return images, nil
+}
+
+// ListBACImagesWithFallback returns labeled images, falling back to a tag-prefix
+// scan for images built before labels were introduced (pre-label compatibility).
+// This fallback can be removed once all users have rebuilt their images with --rebuild.
+func ListBACImagesWithFallback(ctx context.Context, c *Client) ([]image.Summary, error) {
+	images, err := ListBACImages(ctx, c)
+	if err != nil {
+		return nil, err
 	}
 	if len(images) == 0 {
 		all, err := c.ImageList(ctx, image.ListOptions{})
@@ -309,12 +320,7 @@ func ListBACImages(ctx context.Context, c *Client) ([]image.Summary, error) {
 }
 
 // ExecInContainer runs a command inside a running container and returns the exit code.
-func ExecInContainer(ctx context.Context, containerID string, cmd []string) (int, error) {
-	c, err := NewClient()
-	if err != nil {
-		return -1, fmt.Errorf("connecting to Docker for exec: %w", err)
-	}
-
+func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []string) (int, error) {
 	execID, err := c.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdout: true,

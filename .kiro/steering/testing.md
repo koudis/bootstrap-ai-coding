@@ -16,7 +16,8 @@
 
 ### Integration Tests
 - Gated by `//go:build integration`
-- Run with `go test -tags integration -timeout 30m ./...`
+- Run with `go test -tags integration -timeout 30m -p 1 ./...`
+- **Must use `-p 1`** (sequential package execution) — integration test packages share Docker state (base image removal/pull) and will race or timeout if run in parallel
 - Require a live Docker daemon
 - Cover the full happy path, SSH connectivity, volume sync, credential persistence
 
@@ -39,7 +40,7 @@ Aborted — no consent given.
 **To run integration tests:**
 
 ```bash
-BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m -p 1 ./...
 ```
 
 #### Base image precondition: automatic removal
@@ -55,7 +56,7 @@ In `internal/docker`, `TestAFindConflictingUserPullsImageIfAbsent` (named with `
 **Running integration tests:**
 
 ```bash
-BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m -p 1 ./...
 ```
 
 ---

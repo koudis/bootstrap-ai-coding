@@ -78,5 +78,7 @@ func isImageNotFound(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "No such image") || strings.Contains(msg, "not found")
+	return strings.Contains(msg, "No such image") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "reference does not exist")
 }

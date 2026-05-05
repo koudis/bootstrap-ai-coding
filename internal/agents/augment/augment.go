@@ -84,8 +84,8 @@ func (a *augmentAgent) HasCredentials(storePath string) (bool, error) {
 // HealthCheck verifies that the auggie binary is present and executable inside
 // the running container by executing `auggie --version`.
 // Satisfies: AC-5
-func (a *augmentAgent) HealthCheck(ctx context.Context, containerID string) error {
-	exitCode, err := docker.ExecInContainer(ctx, containerID, []string{"auggie", "--version"})
+func (a *augmentAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
+	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"auggie", "--version"})
 	if err != nil {
 		return fmt.Errorf("augment health check failed: %w", err)
 	}

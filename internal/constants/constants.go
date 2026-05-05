@@ -99,6 +99,10 @@ const (
 	// container that starts D-Bus and gnome-keyring-daemon on SSH login.
 	// Satisfies CC-7.
 	KeyringProfileScript = "/etc/profile.d/dbus-keyring.sh"
+
+	// HostBindIP is the IP address containers bind their SSH port to on the host.
+	// Satisfies R7.
+	HostBindIP = "127.0.0.1"
 )
 
 // ImageBuildTimeout is the maximum time allowed for a Docker image build.

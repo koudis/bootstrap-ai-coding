@@ -4,9 +4,9 @@ package credentials
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/pathutil"
 )
 
 // Resolve returns the effective credential store path for an agent.
@@ -15,7 +15,7 @@ func Resolve(agentDefault, override string) string {
 	if override != "" {
 		return override
 	}
-	return expandHome(agentDefault)
+	return pathutil.ExpandHome(agentDefault)
 }
 
 // EnsureDir creates the directory at path (and all parents) if it does not
@@ -24,10 +24,3 @@ func EnsureDir(path string) error {
 	return os.MkdirAll(path, constants.ToolDataDirPerm)
 }
 
-func expandHome(p string) string {
-	if len(p) >= 2 && p[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, p[2:])
-	}
-	return p
-}

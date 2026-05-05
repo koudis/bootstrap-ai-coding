@@ -373,3 +373,4 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 5. Agent modules SHALL append only `RUN` (and optionally `ENV`, `COPY`) instructions via `Install()` — never `CMD` or `FROM`.
 
 > **Rationale:** Docker's layer cache is sequential. Any instruction that changes invalidates all layers below it. Placing `CMD` before agent `RUN` steps means every agent installation step runs uncached on every build, even when the agent configuration has not changed. With `CMD` last, all `RUN` layers are stable and cached after the first build, reducing subsequent build times from minutes to seconds.
+

@@ -88,3 +88,44 @@ Install D-Bus and gnome-keyring-daemon in the base container image so that tools
     - Run `go build ./...` — must compile cleanly
     - Run `go vet ./...` — must pass
     - Run `go test ./...` — all unit and PBT tests must pass
+
+### Semantic refactoring (R1, R3, R4, R6, R7, R8)
+
+Internal code quality improvements: consolidate duplicated helpers, fix misplaced responsibilities, clarify intent. No user-facing behaviour changes.
+
+- [x] 8. Create `internal/pathutil` package and consolidate `expandHome` (R1)
+  - [x] 8.1 Create `internal/pathutil/pathutil.go` with `ExpandHome` function
+  - [x] 8.2 Create `internal/pathutil/pathutil_test.go` with property test (ExpandHome never returns ~/prefix) and unit tests
+  - [x] 8.3 Update `internal/naming/naming.go` — remove local `expandHome`, import `pathutil`
+  - [x] 8.4 Update `internal/ssh/keys.go` — remove local `expandHome`, import `pathutil`
+  - [x] 8.5 Update `internal/credentials/store.go` — remove local `expandHome`, import `pathutil`
+  - [x] 8.6 Update `internal/datadir/datadir.go` — remove local `expandHome`, import `pathutil`
+  - [x] 8.7 Update `internal/cmd/root.go` — remove both `expandHome` and `ExpandHome`, import `pathutil`
+  - [x] 8.8 Update `internal/cmd/root_test.go` — change `cmd.ExpandHome` references to `pathutil.ExpandHome`
+  - [x] 8.9 Run `go build ./...` and `go test ./...` to verify no regressions
+- [x] 9. Update `ExecInContainer` to accept `*Client` parameter (R3)
+  - [x] 9.1 Change `Agent.HealthCheck` interface in `internal/agent/agent.go` to accept `*docker.Client`
+  - [x] 9.2 Update `internal/docker/runner.go` `ExecInContainer` signature to accept `*Client`
+  - [x] 9.3 Update `internal/agents/claude/claude.go` `HealthCheck` to match new interface
+  - [x] 9.4 Update `internal/agents/augment/augment.go` `HealthCheck` to match new interface
+  - [x] 9.5 Update `internal/agent/registry_test.go` stub to match new interface
+  - [x] 9.6 Update any integration tests that call `HealthCheck` or `ExecInContainer`
+  - [x] 9.7 Run `go build ./...` and `go test ./...` to verify no regressions
+- [x] 10. Consolidate inline flag validation in `cmd/root.go` (R4)
+  - [x] 10.1 Replace 7 individual `cmd.Flags().Changed(...)` blocks with `cmd.Flags().Visit` + `ValidateStartOnlyFlags` call
+  - [x] 10.2 Remove private `stringSlicesEqual` wrapper (use `StringSlicesEqual` directly)
+  - [x] 10.3 Run `go build ./...` and `go test ./...` to verify no regressions
+- [x] 11. Split `ListBACImages` into explicit and fallback variants (R6)
+  - [x] 11.1 Refactor `ListBACImages` in `internal/docker/runner.go` to return only labeled images
+  - [x] 11.2 Create `ListBACImagesWithFallback` with the tag-prefix scan logic and doc comment
+  - [x] 11.3 Update `runPurge` in `cmd/root.go` to call `ListBACImagesWithFallback`
+  - [x] 11.4 Run `go build ./...` and `go test ./...` to verify no regressions
+- [x] 12. Extract `HostBindIP` constant (R7)
+  - [x] 12.1 Add `HostBindIP = "127.0.0.1"` to `internal/constants/constants.go`
+  - [x] 12.2 Update `CreateContainer` in `internal/docker/runner.go` to use `constants.HostBindIP`
+  - [x] 12.3 Update `WaitForSSH` call in `internal/cmd/root.go` to use `constants.HostBindIP`
+  - [x] 12.4 Run `go build ./...` and `go test ./...` to verify no regressions
+- [x] 13. Move `CredentialPreparer` to its own file (R8)
+  - [x] 13.1 Create `internal/agent/preparer.go` with the `CredentialPreparer` interface
+  - [x] 13.2 Remove `CredentialPreparer` from `internal/agent/agent.go`
+  - [x] 13.3 Run `go build ./...` and `go test ./...` to verify no regressions

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/pathutil"
 )
 
 // consecutiveDashes matches two or more consecutive dashes.
@@ -140,7 +141,7 @@ func ContainerName(projectPath string, existingNames []string) (string, error) {
 // Tool_Data_Dir entry under constants.ToolDataDirRoot. These names were
 // previously assigned by this tool and must not be treated as collisions.
 func knownDataDirNames() map[string]struct{} {
-	root := expandHome(constants.ToolDataDirRoot)
+	root := pathutil.ExpandHome(constants.ToolDataDirRoot)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return map[string]struct{}{}
@@ -154,11 +155,3 @@ func knownDataDirNames() map[string]struct{} {
 	return m
 }
 
-// expandHome expands a leading "~/" to the user's home directory.
-func expandHome(p string) string {
-	if len(p) >= 2 && p[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, p[2:])
-	}
-	return p
-}

@@ -55,10 +55,10 @@ func TestMain(m *testing.M) {
 
 // setupContainer creates a temp project dir, builds a container image, starts
 // the container, waits for SSH to be ready, and returns the container name,
-// SSH port, and a cleanup function.
+// SSH port, Docker client, and a cleanup function.
 //
 // The caller is responsible for registering the cleanup via t.Cleanup or defer.
-func setupContainer(t *testing.T) (containerName string, sshPort int, cleanup func()) {
+func setupContainer(t *testing.T) (containerName string, sshPort int, client *docker.Client, cleanup func()) {
 	t.Helper()
 
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -90,7 +90,7 @@ func setupContainer(t *testing.T) (containerName string, sshPort int, cleanup fu
 
 	// 5. Build a DockerfileBuilder with the host UID/GID.
 	// Check for UID/GID conflicts in the base image first (mirrors runStart logic).
-	client, err := docker.NewClient()
+	client, err = docker.NewClient()
 	require.NoError(t, err, "connecting to Docker daemon")
 
 	strategy := docker.UserStrategyCreate
@@ -169,7 +169,7 @@ func setupContainer(t *testing.T) (containerName string, sshPort int, cleanup fu
 		}
 	}
 
-	return containerName, port, cleanup
+	return containerName, port, client, cleanup
 }
 
 // ----------------------------------------------------------------------------
@@ -182,7 +182,7 @@ func TestContainerStartsAndSSHConnects(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	_, sshPort, cleanup := setupContainer(t)
+	_, sshPort, _, cleanup := setupContainer(t)
 	t.Cleanup(cleanup)
 
 	// Assert TCP connection to SSH port succeeds.
@@ -202,7 +202,7 @@ func TestWorkspaceMountLiveSync(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	containerName, _, cleanup := setupContainer(t)
+	containerName, _, client, cleanup := setupContainer(t)
 	t.Cleanup(cleanup)
 
 	// Write a file to the host project dir (the mount source).
@@ -219,14 +219,14 @@ func TestWorkspaceMountLiveSync(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a file inside the container at /workspace.
-	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{
+	exitCode, err := docker.ExecInContainer(ctx, client, containerName, []string{
 		"bash", "-c", "echo 'hello from container' > /workspace/sync-test.txt",
 	})
 	require.NoError(t, err, "exec to create file in /workspace")
 	require.Equal(t, 0, exitCode, "expected exit 0 when creating file in /workspace")
 
 	// Verify the file exists inside the container at the workspace mount path.
-	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{
+	exitCode, err = docker.ExecInContainer(ctx, client, containerName, []string{
 		"test", "-f", constants.WorkspaceMountPath + "/sync-test.txt",
 	})
 	require.NoError(t, err, "exec to verify file in /workspace")
@@ -243,7 +243,7 @@ func TestFileOwnershipMatchesHostUser(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	containerName, _, cleanup := setupContainer(t)
+	containerName, _, client, cleanup := setupContainer(t)
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
@@ -254,7 +254,7 @@ func TestFileOwnershipMatchesHostUser(t *testing.T) {
 	// Create a file inside the container at /workspace/ as the container user.
 	// Use `su` to run as the container user so the file is owned by UID/GID 1000,
 	// not root (docker exec runs as root by default).
-	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{
+	exitCode, err := docker.ExecInContainer(ctx, client, containerName, []string{
 		"su", "-c", "touch /workspace/ownership-test.txt", constants.ContainerUser,
 	})
 	require.NoError(t, err)
@@ -263,13 +263,13 @@ func TestFileOwnershipMatchesHostUser(t *testing.T) {
 	// Check UID and GID in two separate execs to keep the shell commands simple
 	// and avoid quoting issues. Each command exits 0 iff the value matches.
 	checkUID := fmt.Sprintf(`[ "$(stat -c '%%u' /workspace/ownership-test.txt)" = "%s" ]`, u.Uid)
-	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{"bash", "-c", checkUID})
+	exitCode, err = docker.ExecInContainer(ctx, client, containerName, []string{"bash", "-c", checkUID})
 	require.NoError(t, err, "exec to check file UID")
 	require.Equal(t, 0, exitCode,
 		"expected file UID inside container to match host user UID=%s", u.Uid)
 
 	checkGID := fmt.Sprintf(`[ "$(stat -c '%%g' /workspace/ownership-test.txt)" = "%s" ]`, u.Gid)
-	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{"bash", "-c", checkGID})
+	exitCode, err = docker.ExecInContainer(ctx, client, containerName, []string{"bash", "-c", checkGID})
 	require.NoError(t, err, "exec to check file GID")
 	require.Equal(t, 0, exitCode,
 		"expected file GID inside container to match host user GID=%s", u.Gid)
@@ -285,22 +285,19 @@ func TestCredentialVolumePersistedAcrossRestart(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	containerName, sshPort, cleanup := setupContainer(t)
+	containerName, sshPort, client, cleanup := setupContainer(t)
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
 
 	// Write a sentinel file to /workspace (the bind-mounted volume) inside the container.
-	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{
+	exitCode, err := docker.ExecInContainer(ctx, client, containerName, []string{
 		"bash", "-c", "echo 'persistent' > /workspace/persist-test.txt",
 	})
 	require.NoError(t, err)
 	require.Equal(t, 0, exitCode, "expected exit 0 when writing sentinel file")
 
 	// Stop the container.
-	client, err := docker.NewClient()
-	require.NoError(t, err)
-
 	err = docker.StopContainer(ctx, client, containerName)
 	require.NoError(t, err, "stopping container")
 
@@ -313,7 +310,7 @@ func TestCredentialVolumePersistedAcrossRestart(t *testing.T) {
 	require.NoError(t, err, "waiting for SSH after restart")
 
 	// Assert the file is still present.
-	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{
+	exitCode, err = docker.ExecInContainer(ctx, client, containerName, []string{
 		"test", "-f", "/workspace/persist-test.txt",
 	})
 	require.NoError(t, err)
@@ -330,18 +327,16 @@ func TestSSHPortPersistenceAcrossRestarts(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	containerName, sshPort, cleanup := setupContainer(t)
+	containerName, sshPort, client, cleanup := setupContainer(t)
 	t.Cleanup(cleanup)
 
 	ctx := context.Background()
-	client, err := docker.NewClient()
-	require.NoError(t, err)
 
 	// Record the SSH port before restart.
 	originalPort := sshPort
 
 	// Stop the container.
-	err = docker.StopContainer(ctx, client, containerName)
+	err := docker.StopContainer(ctx, client, containerName)
 	require.NoError(t, err, "stopping container")
 
 	// Restart the container.
@@ -472,7 +467,7 @@ func TestPurgeRemovesContainersAndImages(t *testing.T) {
 
 	ctx := context.Background()
 
-	containerName, _, _ := setupContainer(t)
+	containerName, _, _, _ := setupContainer(t)
 	// Note: we do NOT register the cleanup here because we are testing purge.
 
 	client, err := docker.NewClient()
@@ -533,7 +528,7 @@ func TestKnownHostsEntriesLifecycle(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 
-	_, sshPort, cleanup := setupContainer(t)
+	_, sshPort, _, cleanup := setupContainer(t)
 
 	// Generate a host public key to use as the known_hosts entry value.
 	_, hostPubKey, err := sshpkg.GenerateHostKeyPair()
@@ -588,7 +583,7 @@ func TestSSHConfigEntryLifecycle(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 
-	containerName, sshPort, cleanup := setupContainer(t)
+	containerName, sshPort, _, cleanup := setupContainer(t)
 
 	// Add SSH config entry after container starts.
 	err := sshpkg.SyncSSHConfig(containerName, sshPort, false)

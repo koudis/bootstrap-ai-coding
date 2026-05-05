@@ -16,7 +16,7 @@ test:
 
 ## test-integration: run integration tests (requires a running Docker daemon)
 test-integration:
-	go test -tags integration ./...
+	BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m -p 1 ./...
 
 ## vet: run go vet
 vet:

@@ -29,7 +29,7 @@ go build ./...
 go test ./...
 
 # Run integration tests (requires Docker daemon)
-go test -tags integration ./...
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m -p 1 ./...
 
 # Run a specific package's tests
 go test ./naming/...
@@ -54,7 +54,7 @@ go run . --purge
 ## Testing Conventions
 
 - Unit and property-based tests: no build tag, run with `go test ./...`
-- Integration tests: gated by `//go:build integration`, require a live Docker daemon
+- Integration tests: gated by `//go:build integration`, require a live Docker daemon, must use `-p 1` to avoid cross-package Docker state races
 - Property tests use `rapid.Check(t, func(t *rapid.T) { ... })` with minimum 100 iterations
 - Property test tag format: `// Feature: bootstrap-ai-coding, Property N: <property text>`
 - Coverage target: ≥ 80% line coverage on all non-integration packages

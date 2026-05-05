@@ -10,6 +10,9 @@ bootstrap-ai-coding/
     ├── constants/
     │   └── constants.go                 # All constants from the requirements glossary — single source of truth
     │
+    ├── pathutil/
+    │   └── pathutil.go                  # Shared path helpers (ExpandHome) — zero internal dependencies
+    │
     ├── cmd/
     │   └── root.go                      # Cobra root command, flag definitions, top-level orchestration logic
     │
@@ -35,6 +38,7 @@ bootstrap-ai-coding/
     │
     ├── agent/
     │   ├── agent.go                     # Agent interface — the stable API boundary between core and agent modules
+    │   ├── preparer.go                  # CredentialPreparer optional interface
     │   └── registry.go                  # AgentRegistry: Register / Lookup / All / KnownIDs
     │
     └── agents/
@@ -48,10 +52,11 @@ bootstrap-ai-coding/
 ## Architectural Rules
 
 - **All packages live under `internal/`.** The Go compiler enforces that nothing outside this module can import them.
-- **Core has zero knowledge of agents.** Packages under `internal/cmd/`, `internal/naming/`, `internal/docker/`, `internal/ssh/`, `internal/credentials/`, `internal/datadir/`, `internal/portfinder/`, and `internal/agent/` must never import anything under `internal/agents/`.
+- **Core has zero knowledge of agents.** Packages under `internal/cmd/`, `internal/naming/`, `internal/docker/`, `internal/ssh/`, `internal/credentials/`, `internal/datadir/`, `internal/portfinder/`, `internal/pathutil/`, and `internal/agent/` must never import anything under `internal/agents/`.
 - **Agent modules are wired in via blank imports in `main.go` only.** Each agent's `init()` calls `agent.Register()`.
-- **Agent modules may import `internal/agent`, `internal/docker`, and `internal/constants` from the core.** They must not import `internal/cmd`, `internal/naming`, `internal/ssh`, `internal/credentials`, `internal/datadir`, `internal/portfinder`, or `internal/docker/runner`.
+- **Agent modules may import `internal/agent`, `internal/docker`, `internal/constants`, and `internal/pathutil` from the core.** They must not import `internal/cmd`, `internal/naming`, `internal/ssh`, `internal/credentials`, `internal/datadir`, `internal/portfinder`, or `internal/docker/runner`.
 - **No package may hardcode values that exist in `internal/constants/`.** Always import and reference `constants.*`.
+- **Path expansion (`~/` → home dir) must use `pathutil.ExpandHome`.** No package may define its own `expandHome` helper.
 - **Adding a new agent = one new package under `internal/agents/`.** No other files change.
 
 ## Import Path Pattern
@@ -67,6 +72,7 @@ import (
 // In internal packages:
 import (
     "github.com/koudis/bootstrap-ai-coding/internal/constants"
+    "github.com/koudis/bootstrap-ai-coding/internal/pathutil"
     "github.com/koudis/bootstrap-ai-coding/internal/naming"
 )
 ```

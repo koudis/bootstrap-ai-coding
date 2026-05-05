@@ -16,6 +16,7 @@ import (
 
 	"github.com/docker/docker/api/types/image"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/agent"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
@@ -23,6 +24,7 @@ import (
 	"github.com/koudis/bootstrap-ai-coding/internal/datadir"
 	dockerpkg "github.com/koudis/bootstrap-ai-coding/internal/docker"
 	"github.com/koudis/bootstrap-ai-coding/internal/naming"
+	"github.com/koudis/bootstrap-ai-coding/internal/pathutil"
 	"github.com/koudis/bootstrap-ai-coding/internal/portfinder"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
 )
@@ -177,26 +179,12 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if mode == ModeStop || mode == ModePurge {
-		if cmd.Flags().Changed("agents") {
-			return fmt.Errorf("--agents is not valid with %s", modeFlag(mode))
-		}
-		if cmd.Flags().Changed("port") {
-			return fmt.Errorf("--port is not valid with %s", modeFlag(mode))
-		}
-		if cmd.Flags().Changed("ssh-key") {
-			return fmt.Errorf("--ssh-key is not valid with %s", modeFlag(mode))
-		}
-		if cmd.Flags().Changed("rebuild") {
-			return fmt.Errorf("--rebuild is not valid with %s", modeFlag(mode))
-		}
-		if cmd.Flags().Changed("no-update-known-hosts") {
-			return fmt.Errorf("--no-update-known-hosts is not valid with %s", modeFlag(mode))
-		}
-		if cmd.Flags().Changed("no-update-ssh-config") {
-			return fmt.Errorf("--no-update-ssh-config is not valid with %s", modeFlag(mode))
-		}
-		if cmd.Flags().Changed("verbose") {
-			return fmt.Errorf("--verbose is not valid with %s", modeFlag(mode))
+		var changed []string
+		cmd.Flags().Visit(func(f *pflag.Flag) {
+			changed = append(changed, f.Name)
+		})
+		if err := ValidateStartOnlyFlags(mode, changed); err != nil {
+			return err
 		}
 	}
 
@@ -304,7 +292,7 @@ func runPurge(c *dockerpkg.Client) error {
 	if err != nil {
 		return err
 	}
-	images, err := dockerpkg.ListBACImages(ctx, c)
+	images, err := dockerpkg.ListBACImagesWithFallback(ctx, c)
 	if err != nil {
 		return err
 	}
@@ -330,7 +318,7 @@ func runPurge(c *dockerpkg.Client) error {
 	fmt.Printf("This will delete:\n")
 	fmt.Printf("  %d container(s)\n", len(containers))
 	fmt.Printf("  %d image(s)\n", len(images))
-	fmt.Printf("  %s\n", expandHome(constants.ToolDataDirRoot))
+	fmt.Printf("  %s\n", pathutil.ExpandHome(constants.ToolDataDirRoot))
 	fmt.Printf("\nType 'yes' to confirm: ")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -511,7 +499,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 				var manifestIDs []string
 				if err := json.Unmarshal([]byte(manifestJSON), &manifestIDs); err != nil {
 					needBuild = true
-				} else if !stringSlicesEqual(manifestIDs, enabledIDs) {
+				} else if !StringSlicesEqual(manifestIDs, enabledIDs) {
 					fmt.Println("Agent config changed — run with --rebuild to update the image.")
 					return nil
 				}
@@ -628,7 +616,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return err
 	}
 
-	if err := dockerpkg.WaitForSSH(ctx, constants.KnownHostsPatterns[1], sshPort, 10*time.Second); err != nil {
+	if err := dockerpkg.WaitForSSH(ctx, constants.HostBindIP, sshPort, 10*time.Second); err != nil {
 		_ = dockerpkg.StopContainer(ctx, c, containerName)
 		_ = dockerpkg.RemoveContainer(ctx, c, containerName)
 		return fmt.Errorf("container started but SSH did not become ready: %w", err)
@@ -680,10 +668,6 @@ func hostUIDGID() (int, int, error) {
 	return uid, gid, nil
 }
 
-func stringSlicesEqual(a, b []string) bool {
-	return StringSlicesEqual(a, b)
-}
-
 // StringSlicesEqual reports whether a and b contain the same elements in the same order.
 func StringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
@@ -695,17 +679,4 @@ func StringSlicesEqual(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-func expandHome(p string) string {
-	return ExpandHome(p)
-}
-
-// ExpandHome expands a leading "~/" to the user's home directory.
-func ExpandHome(p string) string {
-	if len(p) >= 2 && p[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, p[2:])
-	}
-	return p
 }

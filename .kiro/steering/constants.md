@@ -25,13 +25,28 @@ This means:
 | `ContainerSSHPort` | `22` | SSH port inside the container |
 | `ToolDataDirRoot` | `"~/.config/bootstrap-ai-coding"` | `Tool_Data_Dir` (root) |
 | `ContainerNamePrefix` | `"bac-"` | container naming convention |
-| `ContainerNameHashLen` | `12` | container naming convention |
+| `ContainerNameParentSep` | `"_"` | separator between parentdir and dirname in container names (Req 5.1) |
+| `ContainerNameCounterSep` | `"-"` | separator before numeric counter suffix in container names (Req 5.1) |
 | `ManifestFilePath` | `"/bac-manifest.json"` | manifest file inside image |
-| `DefaultAgent` | `"claude-code"` | default `Enabled_Agents` (Req 7.5) |
+| `ClaudeCodeAgentName` | `"claude-code"` | Agent_ID for Claude Code (CC-1) |
+| `AugmentCodeAgentName` | `"augment-code"` | Agent_ID for Augment Code (AC-1) |
+| `DefaultAgents` | `"claude-code,augment-code"` | default `Enabled_Agents` (Req 7.5) |
 | `SSHHostKeyType` | `"ed25519"` | SSH host key algorithm |
 | `MinDockerVersion` | `"20.10"` | minimum Docker version (Req 6.3) |
 | `ToolDataDirPerm` | `0o700` | Tool_Data_Dir permissions (Req 15.2) |
 | `ToolDataFilePerm` | `0o600` | Tool_Data_Dir file permissions (Req 15.3) |
+| `KnownHostsFile` | `"~/.ssh/known_hosts"` | Known_Hosts_File (Req 18) |
+| `SSHConfigFile` | `"~/.ssh/config"` | SSH_Config_File (Req 19) |
+| `SSHDirPerm` | `0o700` | ~/.ssh directory permissions (Req 18.5) |
+| `ImageBuildTimeout` | `8 * time.Minute` | Image_Build_Timeout (Req 14.7) |
+
+### Variables (not const — Go does not support slice/map constants)
+
+| Variable | Value | Glossary Term |
+|---|---|---|
+| `PublicKeyDefaultPaths` | `["~/.ssh/id_ed25519.pub", "~/.ssh/id_rsa.pub"]` | Public_Key discovery order (Req 4.1) |
+| `KnownHostsPatterns` | `["[localhost]", "127.0.0.1"]` | Known_Hosts_Entry host patterns (Req 18) |
+| `Version` | `"dev"` (overridden via ldflags) | build version |
 
 ## Import Pattern
 
@@ -40,7 +55,6 @@ import "github.com/koudis/bootstrap-ai-coding/internal/constants"
 
 // Use like:
 b.From(constants.BaseContainerImage)
-fmt.Sprintf("%s%x", constants.ContainerNamePrefix, hash[:constants.ContainerNameHashLen/2])
 os.MkdirAll(path, constants.ToolDataDirPerm)
 for port := constants.SSHPortStart; port < 65535; port++ { ... }
 ```

@@ -188,8 +188,11 @@ make release
 # Unit and property-based tests
 go test ./...
 
-# Integration tests (requires a running Docker daemon)
-go test -tags integration ./...
+# Integration tests
+# Integration tests (requires a running Docker daemon and explicit consent).
+# The suite automatically removes the base image before running to ensure
+# the pull path is exercised. No manual 'docker rmi' needed.
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
 
 # Vet
 go vet ./...

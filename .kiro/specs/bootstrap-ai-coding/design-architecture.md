@@ -118,7 +118,7 @@ sequenceDiagram
         else No conflict
             CLI->>CLI: Set user_strategy = create (use useradd in Dockerfile)
         end
-        CLI->>Docker: Build image (DockerfileBuilder: ubuntu:26.04 + user_strategy + sshd + host key + agents + manifest)
+        CLI->>Docker: Build image (DockerfileBuilder: ubuntu:26.04 + user_strategy + sshd + host key + agents + manifest) [verbose=Config.Verbose]
     end
     CLI->>Docker: Inspect container by name
     alt Container already running
@@ -224,6 +224,7 @@ const (
     SSHDirPerm                  = 0o700
     KnownHostsFile              = "~/.ssh/known_hosts"
     SSHConfigFile               = "~/.ssh/config"
+    ImageBuildTimeout           = 8 * time.Minute  // Image_Build_Timeout glossary term
 )
 ```
 
@@ -303,8 +304,27 @@ func (b *DockerfileBuilder) Run(cmd string)
 func (b *DockerfileBuilder) Env(k, v string)
 func (b *DockerfileBuilder) Copy(src, dst string)
 func (b *DockerfileBuilder) Cmd(cmd string)
+func (b *DockerfileBuilder) Finalize()        // appends CMD — must be called last, after all agent Install() steps
 func (b *DockerfileBuilder) Build() string
 func (b *DockerfileBuilder) Lines() []string
+```
+
+**Dockerfile instruction order (Req 21):** `NewDockerfileBuilder` seeds the base layers (FROM, openssh-server, Container_User, sudo, SSH keys, sshd_config, /run/sshd) but does **not** append `CMD`. The caller appends agent steps via `Install()`, then the manifest `RUN`, then calls `Finalize()` to append `CMD` as the final instruction. This ensures all `RUN` layers are ordered before `CMD`, keeping them in Docker's layer cache across rebuilds.
+
+```
+FROM ubuntu:26.04
+RUN apt-get install openssh-server sudo     ← base, stable, cached
+RUN groupadd/useradd (or usermod rename)    ← stable per project, cached
+RUN sudoers                                 ← stable, cached
+RUN SSH authorized_keys                     ← stable per user key, cached
+RUN SSH host key injection                  ← stable per project, cached
+RUN sshd_config hardening                   ← stable, cached
+RUN mkdir /run/sshd                         ← stable, cached
+RUN apt-get install curl ca-certificates    ← agent step, cached after first build
+RUN nodesource setup + nodejs               ← agent step, cached after first build
+RUN npm install -g @augmentcode/auggie      ← agent step, cached after first build
+RUN echo manifest > /bac-manifest.json     ← stable when agents unchanged, cached
+CMD ["/usr/sbin/sshd", "-D"]               ← always last (Req 21.2)
 ```
 
 ### Base Image User Inspection
@@ -324,6 +344,33 @@ func FindConflictingUser(ctx context.Context, client *Client, uid, gid int) (*Im
 ```
 
 **Validates: Req 9.1–9.3, Req 10.1–10.5, Req 10a.4, Req 13.2**
+
+---
+
+### Docker Image Build — Verbose Mode
+
+`docker/runner.go` exposes `BuildImage` and `BuildImageWithTimeout`. Both accept a `verbose bool` parameter that controls how the Docker daemon's build response stream is handled.
+
+The Docker SDK's `client.ImageBuild` returns an `io.ReadCloser` whose body is a sequence of newline-delimited JSON objects, each with a `stream` field (progress text) and optionally an `error` field.
+
+**Silent mode (`verbose == false`, default):**
+The stream is drained in a background goroutine. Each decoded `stream` value is accumulated in a `strings.Builder` for error reporting only. No output is written to stdout. The "Building image..." message (Req 14.5) is the only visible indication that a build is in progress.
+
+**Verbose mode (`verbose == true`):**
+Each decoded `stream` value is written to `os.Stdout` immediately as it arrives, producing real-time layer-by-layer progress and `RUN` step output. Error detection and timeout handling are identical to silent mode.
+
+```go
+// BuildImage builds a Docker image from the spec's Dockerfile.
+// When verbose is true, build output is streamed to os.Stdout in real time.
+func BuildImage(ctx context.Context, c *Client, spec ContainerSpec, verbose bool) (string, error)
+
+// BuildImageWithTimeout is the underlying implementation used by BuildImage.
+func BuildImageWithTimeout(ctx context.Context, c *Client, spec ContainerSpec, timeout time.Duration, verbose bool) (string, error)
+```
+
+The `verbose` flag is threaded from `Config.Verbose` → `runStart` → `BuildImage`. It is never consulted when no build is triggered (manifest matches and `--rebuild` is absent).
+
+**Validates: Req 20.2, 20.3, 20.4, 20.6**
 
 ---
 
@@ -496,6 +543,7 @@ type Config struct {
     SSHKeyPath         string
     SSHPort            int    // 0 = auto-select
     Rebuild            bool
+    Verbose            bool
     NoUpdateKnownHosts bool
     NoUpdateSSHConfig  bool
     CredStoreOverrides map[string]string
@@ -537,6 +585,50 @@ type SessionSummary struct {
 
 ---
 
+## Integration Test Infrastructure
+
+### Shared helpers (`internal/testutil`)
+
+All integration test packages share common setup logic via `internal/testutil/consent.go` (gated by `//go:build integration`):
+
+**`RequireIntegrationConsent()`** — checks `BAC_INTEGRATION_CONSENT` env var. If not set to `yes`, prints a warning to stderr and exits with code 1. Called from `TestMain` in every integration test package after verifying Docker is available.
+
+**`EnsureBaseImageAbsent()`** — connects to Docker, checks if `constants.BaseContainerImage` is present locally, and removes it if so. This guarantees every suite starts from a clean slate: the first test that builds a container triggers a fresh pull of the base image. Called from `TestMain` after `RequireIntegrationConsent()`.
+
+The consent check runs after the Docker availability check — if Docker is not installed, the suite proceeds directly to `m.Run()` and individual tests skip themselves gracefully.
+
+### Consent gate
+
+When `BAC_INTEGRATION_CONSENT` is **not** set to `yes`, the suite prints a warning to stderr and aborts with exit code 1.
+
+```
+WARNING: Integration tests interact with the local Docker daemon.
+They may pull, build, delete, and update Docker images and containers.
+
+To run these tests, set the environment variable:
+  BAC_INTEGRATION_CONSENT=yes go test -tags integration ./...
+
+Aborted — no consent given.
+```
+
+**To run integration tests:**
+
+```bash
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+```
+
+### Base image precondition
+
+`EnsureBaseImageAbsent()` removes `constants.BaseContainerImage` from the local Docker store at the start of every integration suite. This ensures:
+
+1. The auto-pull path is always exercised (the first test in each package triggers a pull)
+2. No stale cached image can mask regressions in pull logic
+3. Developers don't need to manually run `docker rmi` before testing
+
+The `TestAFindConflictingUserPullsImageIfAbsent` test (in `internal/docker`) is named with an "A" prefix so it runs first alphabetically. It calls `FindConflictingUser` on an absent image and asserts the function succeeds (pulling the image automatically). All subsequent tests in the suite benefit from the now-cached image.
+
+---
+
 ## Core Error Handling
 
 ### CLI Flag Combination Errors (validated before all other checks)
@@ -546,7 +638,7 @@ type SessionSummary struct {
 | `--stop-and-remove` and `--purge` both set | CLI-1 | Descriptive error → stderr, exit 1 |
 | START or STOP mode and `<project-path>` absent | CLI-2 | Usage message → stderr, exit 1 |
 | PURGE mode and `<project-path>` provided | CLI-2 | Descriptive error → stderr, exit 1 |
-| STOP or PURGE mode and any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config` set | CLI-3 | Descriptive error naming the incompatible flag(s) → stderr, exit 1 |
+| STOP or PURGE mode and any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config`, `--verbose` set | CLI-3 | Descriptive error naming the incompatible flag(s) → stderr, exit 1 |
 | `--port` value outside 1024–65535 | CLI-5 | Descriptive error → stderr, exit 1 |
 | `--agents` parses to empty list | CLI-6 | Descriptive error → stderr, exit 1 |
 | `--agents` contains unknown agent ID | CLI-6 | Unknown ID + available IDs → stderr, exit 1 |
@@ -564,6 +656,7 @@ type SessionSummary struct {
 | Conflicting_Image_User found, user declines rename | UID/GID conflict check | "Cannot build without resolving UID/GID conflict" → stderr, exit 1 |
 | Agent manifest mismatch | Image inspect on startup | "Run with --rebuild" message → stdout, exit 0 |
 | Image build failure | Docker build | Build log → stderr, exit 1 |
+| Image build timeout (`constants.ImageBuildTimeout`) | Docker build | Timeout error → stderr, exit 1 |
 | Container start failure | Docker start | Stop container, error → stderr, exit 1 |
 | SSH health check timeout | Post-start TCP poll | Stop container, error → stderr, exit 1 |
 | Persisted port in use by another process | Port check before start | Port conflict message → stderr, exit 1 |

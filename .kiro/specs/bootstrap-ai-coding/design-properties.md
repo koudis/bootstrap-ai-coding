@@ -316,7 +316,7 @@
 
 #### Property 28: Claude Code agent ID is stable
 
-*For any* invocation, `claudeAgent.ID()` SHALL always return `constants.DefaultAgent` (`"claude-code"`).
+*For any* invocation, `claudeAgent.ID()` SHALL always return `constants.ClaudeCodeAgentName` (`"claude-code"`).
 
 **Validates: Agent Req CC-1**
 
@@ -417,6 +417,24 @@
 *For any* `~/.ssh/config` containing a mix of bac-prefixed and non-bac entries, `RemoveAllBACSSHConfigEntries` removes all and only the entries whose `Host` value starts with `constants.ContainerNamePrefix`.
 
 **Validates: Req 19.8**
+
+---
+
+---
+
+#### Property 50: Silent mode produces no Docker build output on stdout
+
+*For any* build invocation where `verbose == false`, the `BuildImageWithTimeout` function SHALL NOT write any Docker build stream content to stdout. The only visible output during a silent build is the "Building image..." message printed by the caller before invoking `BuildImage`.
+
+**Validates: Req 20.2**
+
+---
+
+#### Property 51: Verbose mode streams non-empty output for any non-trivial Dockerfile
+
+*For any* Dockerfile containing at least one `RUN` instruction, a `BuildImageWithTimeout` call with `verbose == true` SHALL result in at least one non-empty `stream` line being written to stdout before the build completes successfully.
+
+**Validates: Req 20.3**
 
 ---
 
@@ -619,7 +637,7 @@ func TestClaudeHasCredentials(t *testing.T) {
         if hasFile {
             os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(`{}`), constants.ToolDataFilePerm)
         }
-        a, _ := agent.Lookup(constants.DefaultAgent)
+        a, _ := agent.Lookup(constants.ClaudeCodeAgentName)
         got, err := a.HasCredentials(dir)
         require.NoError(t, err)
         require.Equal(t, hasFile, got)
@@ -726,10 +744,33 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
 | `TestSSHConfigSkippedWithNoUpdateFlag` | Req 19.9 |
 | `TestNoUpdateSSHConfigFlagWithStopRejected` | CLI-3 |
 | `TestNoUpdateSSHConfigFlagWithPurgeRejected` | CLI-3 |
+| `TestVerboseFlagWithStopRejected` | CLI-3, Req 20.5 |
+| `TestVerboseFlagWithPurgeRejected` | CLI-3, Req 20.5 |
+| `TestVerboseSilentModeNoStdout` | Req 20.2 |
+| `TestVerboseModeStreamsOutput` | Req 20.3 |
 
 ### Integration Tests
 
 Gated by `//go:build integration`. Require a running Docker daemon.
+
+#### Environment precondition: base image must NOT be present
+
+The `internal/docker` integration suite enforces via `TestMain` that `constants.BaseContainerImage` is **not** present in the local Docker image store when the suite starts. `TestFindConflictingUserPullsImageIfAbsent` specifically tests the auto-pull path — if the image is already cached, that test would never exercise the pull logic and its result would be a false positive.
+
+`TestMain` fails the entire suite immediately if the image is present:
+
+```
+INTEGRATION TEST ENVIRONMENT ERROR
+The base image "ubuntu:26.04" is already present in the local Docker image store.
+Fix: docker rmi ubuntu:26.04
+```
+
+**Before running integration tests:**
+
+```bash
+docker rmi ubuntu:26.04
+go test -tags integration -timeout 30m ./...
+```
 
 | Test | Validates |
 |---|---|
@@ -742,6 +783,8 @@ Gated by `//go:build integration`. Require a running Docker daemon.
 | `TestPurgeRemovesContainersAndImages` | Req 16.2, 16.4 |
 | `TestKnownHostsEntriesLifecycle` | Req 18.1–18.2, 18.7 |
 | `TestSSHConfigEntryLifecycle` | Req 19.1–19.2, 19.7 |
+| `TestBuildImageTimeoutEnforced` | Req 14.7 |
+| `TestFindConflictingUserPullsImageIfAbsent` | Req 10a.1 |
 | `TestClaudeAvailableInContainer` | Agent Req CC-2.3 |
 | `TestClaudeHealthCheck` | Agent Req CC-5 |
 | `TestAugmentAvailableInContainer` | Agent Req AC-2.3 |

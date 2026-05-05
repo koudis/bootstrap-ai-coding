@@ -3,6 +3,8 @@
 // than hardcoding these values.
 package constants
 
+import "time"
+
 const (
 	// BaseContainerImage is the base Docker image for all containers.
 	// Corresponds to the Base_Container_Image glossary term.
@@ -93,6 +95,12 @@ const (
 	// Satisfies Req 18.5.
 	SSHDirPerm = 0o700
 )
+
+// ImageBuildTimeout is the maximum time allowed for a Docker image build.
+// Building installs Node.js and npm packages, so 8 minutes is sufficient
+// for a warm cache and bounded — a hung RUN step will be cancelled rather
+// than blocking forever.
+const ImageBuildTimeout = 8 * time.Minute
 
 // Version is the build version, injected at link time via:
 //

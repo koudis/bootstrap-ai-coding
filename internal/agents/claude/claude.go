@@ -26,9 +26,12 @@ func (a *claudeAgent) ID() string {
 }
 
 func (a *claudeAgent) Install(b *docker.DockerfileBuilder) {
-	b.Run("apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git && rm -rf /var/lib/apt/lists/*")
-	b.Run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*")
-	b.Run("npm install -g @anthropic-ai/claude-code")
+	b.Run("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates git && rm -rf /var/lib/apt/lists/*")
+	if !b.IsNodeInstalled() {
+		b.Run("curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*")
+		b.MarkNodeInstalled()
+	}
+	b.Run("npm install -g --no-fund --no-audit @anthropic-ai/claude-code")
 }
 
 func (a *claudeAgent) CredentialStorePath() string {

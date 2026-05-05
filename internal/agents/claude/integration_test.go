@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -22,7 +23,26 @@ import (
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
+	"github.com/koudis/bootstrap-ai-coding/internal/testutil"
 )
+
+// TestMain gates the integration suite behind an explicit consent prompt.
+// Integration tests can delete, update and pull Docker images.
+func TestMain(m *testing.M) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		// Docker not available — individual tests will skip themselves.
+		os.Exit(m.Run())
+	}
+
+	testutil.RequireIntegrationConsent()
+
+	if err := testutil.EnsureBaseImageAbsent(); err != nil {
+		fmt.Fprintf(os.Stderr, "EnsureBaseImageAbsent: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
 
 // setupContainerWithClaude builds a container image with the Claude Code agent
 // installed, starts the container, waits for SSH to be ready, and returns the
@@ -82,6 +102,9 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 	containerName = constants.ContainerNamePrefix + sanitizeClaude(dirName)
 	imageTag := containerName + ":latest"
 
+	// CMD must be the last instruction — call Finalize() before Build().
+	builder.Finalize()
+
 	spec := docker.ContainerSpec{
 		Name:       containerName,
 		ImageTag:   imageTag,
@@ -101,7 +124,7 @@ func setupContainerWithClaude(t *testing.T) (containerName string, sshPort int, 
 		HostGID: gid,
 	}
 
-	_, err = docker.BuildImage(ctx, client, spec)
+	_, err = docker.BuildImage(ctx, client, spec, false)
 	require.NoError(t, err, "building container image with claude")
 
 	_, err = docker.CreateContainer(ctx, client, spec)

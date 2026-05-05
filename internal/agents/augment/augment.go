@@ -31,9 +31,12 @@ func (a *augmentAgent) ID() string {
 // @augmentcode/auggie npm package globally.
 // Satisfies: AC-2
 func (a *augmentAgent) Install(b *docker.DockerfileBuilder) {
-	b.Run("apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git && rm -rf /var/lib/apt/lists/*")
-	b.Run("curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*")
-	b.Run("npm install -g @augmentcode/auggie")
+	b.Run("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates git && rm -rf /var/lib/apt/lists/*")
+	if !b.IsNodeInstalled() {
+		b.Run("curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*")
+		b.MarkNodeInstalled()
+	}
+	b.Run("npm install -g --no-fund --no-audit @augmentcode/auggie")
 }
 
 // CredentialStorePath returns the default host-side credential directory for

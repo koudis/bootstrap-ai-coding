@@ -21,7 +21,33 @@ import (
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
+	"github.com/koudis/bootstrap-ai-coding/internal/testutil"
 )
+
+// ----------------------------------------------------------------------------
+// TestMain — integration suite precondition check
+// ----------------------------------------------------------------------------
+
+// TestMain ensures the base image is removed from the local Docker image store
+// before the integration suite runs. The suite includes
+// TestAFindConflictingUserPullsImageIfAbsent, which specifically tests the
+// pull-before-inspect path. Removing the image guarantees a clean slate so
+// that test always exercises the auto-pull logic.
+func TestMain(m *testing.M) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		// Docker not available — individual tests will skip themselves.
+		os.Exit(m.Run())
+	}
+
+	testutil.RequireIntegrationConsent()
+
+	if err := testutil.EnsureBaseImageAbsent(); err != nil {
+		fmt.Fprintf(os.Stderr, "EnsureBaseImageAbsent: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
 
 // ----------------------------------------------------------------------------
 // Helper: setupContainer
@@ -91,6 +117,9 @@ func setupContainer(t *testing.T) (containerName string, sshPort int, cleanup fu
 	containerName = constants.ContainerNamePrefix + sanitize(dirName)
 	imageTag := containerName + ":latest"
 
+	// CMD must be the last instruction — call Finalize() before Build().
+	builder.Finalize()
+
 	spec := docker.ContainerSpec{
 		Name:       containerName,
 		ImageTag:   imageTag,
@@ -111,7 +140,7 @@ func setupContainer(t *testing.T) (containerName string, sshPort int, cleanup fu
 	}
 
 	// 7. Build the image.
-	_, err = docker.BuildImage(ctx, client, spec)
+	_, err = docker.BuildImage(ctx, client, spec, false)
 	require.NoError(t, err, "building container image")
 
 	// 9. Create and start the container.
@@ -219,29 +248,31 @@ func TestFileOwnershipMatchesHostUser(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Get the host user's UID/GID.
 	u, err := user.Current()
 	require.NoError(t, err)
 
 	// Create a file inside the container at /workspace/ as the container user.
+	// Use `su` to run as the container user so the file is owned by UID/GID 1000,
+	// not root (docker exec runs as root by default).
 	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{
-		"bash", "-c", "touch /workspace/ownership-test.txt",
+		"su", "-c", "touch /workspace/ownership-test.txt", constants.ContainerUser,
 	})
 	require.NoError(t, err)
 	require.Equal(t, 0, exitCode, "expected exit 0 when creating file")
 
-	// Use stat inside the container to get the UID/GID of the file.
-	// We exec stat -c "%u %g" to get numeric UID and GID.
-	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{
-		"bash", "-c",
-		fmt.Sprintf(
-			"uid=$(stat -c %%u /workspace/ownership-test.txt); gid=$(stat -c %%g /workspace/ownership-test.txt); [ \"$uid\" = \"%s\" ] && [ \"$gid\" = \"%s\" ]",
-			u.Uid, u.Gid,
-		),
-	})
-	require.NoError(t, err, "exec to check file ownership")
+	// Check UID and GID in two separate execs to keep the shell commands simple
+	// and avoid quoting issues. Each command exits 0 iff the value matches.
+	checkUID := fmt.Sprintf(`[ "$(stat -c '%%u' /workspace/ownership-test.txt)" = "%s" ]`, u.Uid)
+	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{"bash", "-c", checkUID})
+	require.NoError(t, err, "exec to check file UID")
 	require.Equal(t, 0, exitCode,
-		"expected file UID/GID inside container to match host user UID=%s GID=%s", u.Uid, u.Gid)
+		"expected file UID inside container to match host user UID=%s", u.Uid)
+
+	checkGID := fmt.Sprintf(`[ "$(stat -c '%%g' /workspace/ownership-test.txt)" = "%s" ]`, u.Gid)
+	exitCode, err = docker.ExecInContainer(ctx, containerName, []string{"bash", "-c", checkGID})
+	require.NoError(t, err, "exec to check file GID")
+	require.Equal(t, 0, exitCode,
+		"expected file GID inside container to match host user GID=%s", u.Gid)
 }
 
 // ----------------------------------------------------------------------------
@@ -382,6 +413,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			hostKeyPriv, hostKeyPub,
 			strategy, conflictingUser,
 		)
+		builder.Finalize()
 		spec := docker.ContainerSpec{
 			Name:       containerName,
 			ImageTag:   imageTag,
@@ -395,7 +427,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			HostGID: gid,
 		}
 
-		_, err = docker.BuildImage(ctx, client, spec)
+		_, err = docker.BuildImage(ctx, client, spec, false)
 		require.NoError(t, err, "building image")
 
 		return hostKeyPub
@@ -642,4 +674,99 @@ func sanitize(s string) string {
 // forceRemoveOpts returns image remove options with Force=true.
 func forceRemoveOpts() dockerimage.RemoveOptions {
 	return dockerimage.RemoveOptions{Force: true}
+}
+
+// ----------------------------------------------------------------------------
+// TestBuildImageTimeoutEnforced
+// Validates: Req 14.7 (Image_Build_Timeout)
+// ----------------------------------------------------------------------------
+
+// testBuildTimeout is the deadline used in the timeout integration test.
+// It is intentionally much shorter than constants.ImageBuildTimeout so the
+// test completes quickly. 3 seconds is enough for the Docker daemon to accept
+// the build request and start executing the sleep RUN step before the context
+// is cancelled.
+const testBuildTimeout = 3 * time.Second
+
+func TestBuildImageTimeoutEnforced(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+
+	client, err := docker.NewClient()
+	require.NoError(t, err, "connecting to Docker daemon")
+
+	// Build a minimal Dockerfile whose single RUN step sleeps far longer than
+	// testBuildTimeout. The build must be cancelled before it completes.
+	hangingDockerfile := fmt.Sprintf("FROM %s\nRUN sleep 300\n", constants.BaseContainerImage)
+
+	containerName := constants.ContainerNamePrefix + "timeout-test"
+	imageTag := containerName + ":latest"
+
+	spec := docker.ContainerSpec{
+		Name:       containerName,
+		ImageTag:   imageTag,
+		Dockerfile: hangingDockerfile,
+		Labels:     map[string]string{"bac.managed": "true"},
+	}
+
+	// Ensure any partial image is cleaned up regardless of test outcome.
+	t.Cleanup(func() {
+		cleanCtx := context.Background()
+		images, _ := docker.ListBACImages(cleanCtx, client)
+		for _, img := range images {
+			for _, tag := range img.RepoTags {
+				if tag == imageTag {
+					_, _ = client.ImageRemove(cleanCtx, img.ID, forceRemoveOpts())
+				}
+			}
+		}
+	})
+
+	_, err = docker.BuildImageWithTimeout(ctx, client, spec, testBuildTimeout, false)
+
+	require.Error(t, err, "BuildImageWithTimeout must return an error when the build exceeds the timeout")
+	require.Contains(t, err.Error(), "timed out",
+		"error message must mention 'timed out'; got: %v", err)
+}
+
+// ----------------------------------------------------------------------------
+// TestAFindConflictingUserPullsImageIfAbsent
+// Validates: Req 10a.1 — FindConflictingUser must succeed even when the base
+// image is not present in the local Docker image store.
+//
+// Named with "A" prefix so Go's alphabetical test ordering runs this first.
+// The base image is guaranteed absent by TestMain's call to
+// EnsureBaseImageAbsent(), so this test simply calls FindConflictingUser and
+// asserts it succeeds (pulling the image automatically).
+// ----------------------------------------------------------------------------
+
+func TestAFindConflictingUserPullsImageIfAbsent(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+
+	client, err := docker.NewClient()
+	require.NoError(t, err, "connecting to Docker daemon")
+
+	u, err := user.Current()
+	require.NoError(t, err)
+	uid, err := strconv.Atoi(u.Uid)
+	require.NoError(t, err)
+	gid, err := strconv.Atoi(u.Gid)
+	require.NoError(t, err)
+
+	result, err := docker.FindConflictingUser(ctx, client, uid, gid)
+	require.NoError(t, err,
+		"FindConflictingUser must succeed even when the base image is not cached locally")
+	_ = result
+
+	// Verify the image is now present locally (was pulled by FindConflictingUser).
+	_, _, err = client.ImageInspectWithRaw(ctx, constants.BaseContainerImage)
+	require.NoError(t, err,
+		"base image should be present locally after FindConflictingUser pulls it")
 }

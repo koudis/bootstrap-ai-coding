@@ -160,6 +160,10 @@ func (c *Client) ContainerLogs(ctx context.Context, containerID string, options 
 	return c.inner.ContainerLogs(ctx, containerID, options)
 }
 
+func (c *Client) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
+	return c.inner.ImagePull(ctx, refStr, options)
+}
+
 // --- User conflict detection --------------------------------------------------
 
 // ImageUser represents a user entry found in the base image's /etc/passwd.
@@ -173,9 +177,23 @@ type ImageUser struct {
 // user whose UID or GID matches the given uid/gid. Returns (nil, nil) if no
 // conflict exists. Returns (nil, err) on any Docker error.
 //
-// It runs a short-lived container with "getent passwd", waits for it to exit,
+// It ensures the base image is present locally (pulling it if needed), then
+// runs a short-lived container with "getent passwd", waits for it to exit,
 // reads its stdout, then removes the container.
 func FindConflictingUser(ctx context.Context, client *Client, uid, gid int) (*ImageUser, error) {
+	// 0. Ensure the base image is present locally; pull it if not.
+	// ImageInspectWithRaw is a cheap local-only check — no network call.
+	if _, _, err := client.ImageInspectWithRaw(ctx, constants.BaseContainerImage); err != nil {
+		fmt.Printf("Pulling base image %s...\n", constants.BaseContainerImage)
+		rc, pullErr := client.ImagePull(ctx, constants.BaseContainerImage, image.PullOptions{})
+		if pullErr != nil {
+			return nil, fmt.Errorf("pulling base image %s: %w", constants.BaseContainerImage, pullErr)
+		}
+		// Drain the pull stream so the pull completes before we proceed.
+		_, _ = io.Copy(io.Discard, rc)
+		rc.Close()
+	}
+
 	// 1. Create container (no AutoRemove so we can read logs after exit)
 	resp, err := client.ContainerCreate(ctx, &container.Config{
 		Image: constants.BaseContainerImage,

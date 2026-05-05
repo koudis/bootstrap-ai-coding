@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -61,42 +62,90 @@ func buildContextFromDockerfile(dockerfile string) (io.Reader, error) {
 	return &buf, nil
 }
 
-// BuildImage builds a Docker image from the spec's Dockerfile and tags it with spec.ImageTag.
-func BuildImage(ctx context.Context, c *Client, spec ContainerSpec) (string, error) {
+// BuildImageWithTimeout builds a Docker image like BuildImage but uses the
+// provided timeout instead of constants.ImageBuildTimeout. This is the
+// underlying implementation; use BuildImage for normal operation.
+// When verbose is true, each non-empty stream line is written to os.Stdout as it arrives.
+func BuildImageWithTimeout(ctx context.Context, c *Client, spec ContainerSpec, timeout time.Duration, verbose bool) (string, error) {
 	buildCtx, err := buildContextFromDockerfile(spec.Dockerfile)
 	if err != nil {
 		return "", fmt.Errorf("creating build context: %w", err)
 	}
-	resp, err := c.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
+
+	buildCtxWithTimeout, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	resp, err := c.ImageBuild(buildCtxWithTimeout, buildCtx, build.ImageBuildOptions{
 		Tags:       []string{spec.ImageTag},
 		Dockerfile: "Dockerfile",
 		Remove:     true,
 		Labels:     spec.Labels,
 	})
 	if err != nil {
+		if buildCtxWithTimeout.Err() != nil {
+			return "", fmt.Errorf("image build timed out after %s: %w", timeout, buildCtxWithTimeout.Err())
+		}
 		return "", fmt.Errorf("starting image build: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var out strings.Builder
-	dec := json.NewDecoder(resp.Body)
-	for {
-		var msg struct {
-			Stream string `json:"stream"`
-			Error  string `json:"error"`
-		}
-		if err := dec.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return out.String(), fmt.Errorf("reading build output: %w", err)
-		}
-		if msg.Error != "" {
-			return out.String(), fmt.Errorf("build error: %s", msg.Error)
-		}
-		out.WriteString(msg.Stream)
+	// Drain the build stream in a goroutine so that a context cancellation
+	// (timeout) is not blocked by a hanging Read on the response body.
+	type result struct {
+		output string
+		err    error
 	}
-	return out.String(), nil
+	done := make(chan result, 1)
+
+	go func() {
+		var out strings.Builder
+		dec := json.NewDecoder(resp.Body)
+		for {
+			var msg struct {
+				Stream string `json:"stream"`
+				Error  string `json:"error"`
+			}
+			if err := dec.Decode(&msg); err != nil {
+				if err == io.EOF {
+					done <- result{output: out.String()}
+				} else {
+					done <- result{output: out.String(), err: fmt.Errorf("reading build output: %w", err)}
+				}
+				return
+			}
+			if msg.Error != "" {
+				done <- result{output: out.String(), err: fmt.Errorf("build error: %s", msg.Error)}
+				return
+			}
+			if msg.Stream != "" {
+				out.WriteString(msg.Stream)
+				if verbose {
+					fmt.Fprint(os.Stdout, msg.Stream)
+				}
+			}
+		}
+	}()
+
+	select {
+	case r := <-done:
+		return r.output, r.err
+	case <-buildCtxWithTimeout.Done():
+		// Close the response body immediately so the draining goroutine's
+		// blocked Read call returns right away — without this the goroutine
+		// keeps the connection open and the test runner hangs waiting for it.
+		resp.Body.Close()
+		// Wait for the goroutine to finish so it doesn't leak into subsequent
+		// tests. It will exit promptly now that the body is closed.
+		<-done
+		return "", fmt.Errorf("image build timed out after %s: %w", timeout, buildCtxWithTimeout.Err())
+	}
+}
+
+// BuildImage builds a Docker image from the spec's Dockerfile and tags it with spec.ImageTag.
+// It enforces constants.ImageBuildTimeout; if the build exceeds this deadline the context is
+// cancelled and an error is returned. When verbose is true, build output is streamed to os.Stdout.
+func BuildImage(ctx context.Context, c *Client, spec ContainerSpec, verbose bool) (string, error) {
+	return BuildImageWithTimeout(ctx, c, spec, constants.ImageBuildTimeout, verbose)
 }
 
 // CreateContainer creates a container from the given spec.

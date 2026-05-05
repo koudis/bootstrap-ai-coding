@@ -16,9 +16,47 @@
 
 ### Integration Tests
 - Gated by `//go:build integration`
-- Run with `go test -tags integration ./...`
+- Run with `go test -tags integration -timeout 30m ./...`
 - Require a live Docker daemon
 - Cover the full happy path, SSH connectivity, volume sync, credential persistence
+
+#### Consent gate
+
+Every integration test package has a `TestMain` that prompts for explicit consent before running, because the tests interact with the local Docker daemon and may pull, build, delete, and update Docker images and containers.
+
+When `BAC_INTEGRATION_CONSENT` is **not** set to `yes`, the suite prints a warning and aborts:
+
+```
+WARNING: Integration tests interact with the local Docker daemon.
+They may pull, build, delete, and update Docker images and containers.
+
+To run these tests, set the environment variable:
+  BAC_INTEGRATION_CONSENT=yes go test -tags integration ./...
+
+Aborted — no consent given.
+```
+
+**To run integration tests:**
+
+```bash
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+```
+
+#### Base image precondition: automatic removal
+
+Every integration test package calls `testutil.EnsureBaseImageAbsent()` in `TestMain` (after the consent gate). This helper removes `constants.BaseContainerImage` from the local Docker store if present, so the suite always starts from a clean slate.
+
+- The first test that builds a container triggers a fresh pull of the base image
+- All subsequent tests in the suite reuse the now-cached image
+- No manual `docker rmi` step is needed before running tests
+
+In `internal/docker`, `TestAFindConflictingUserPullsImageIfAbsent` (named with `A` prefix so it runs first alphabetically) specifically validates the auto-pull path: it calls `FindConflictingUser` when the image is absent and asserts the function succeeds.
+
+**Running integration tests:**
+
+```bash
+BAC_INTEGRATION_CONSENT=yes go test -tags integration -timeout 30m ./...
+```
 
 ---
 

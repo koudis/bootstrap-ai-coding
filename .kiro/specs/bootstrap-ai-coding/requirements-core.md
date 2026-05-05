@@ -41,6 +41,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **SSH_Config_Entry**: A `Host` stanza in the SSH_Config_File managed by the tool, identified by a `Host` value matching the Container name (e.g. `bac-my-project`).
 - **Image_Build_Timeout**: The maximum wall-clock duration the CLI will wait for a Container_Image build to complete before cancelling it. Defined as `constants.ImageBuildTimeout` (8 minutes). Agent installation steps (Node.js, npm packages) are legitimately slow on a cold cache, but a build that exceeds this limit is assumed to be hung and is terminated.
 - **Verbose_Mode**: The operating mode activated by the `--verbose` (`-v`) flag. When Verbose_Mode is active, all Docker build output (layer-by-layer progress, `RUN` step output, etc.) is streamed to stdout in real time during a Container_Image build. When Verbose_Mode is inactive (the default), the build runs silently and only the "Building image..." message is shown.
+- **VSCode_Server_Volume**: A named Docker volume mounted at `<Container_User_Home>/.vscode-server` inside the Container. Persists VS Code Remote-SSH server binaries and extensions across Container restarts and rebuilds, eliminating repeated downloads on reconnection.
 
 ---
 
@@ -371,3 +372,18 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 5. Agent modules SHALL append only `RUN` (and optionally `ENV`, `COPY`) instructions via `Install()` — never `CMD` or `FROM`.
 
 > **Rationale:** Docker's layer cache is sequential. Any instruction that changes invalidates all layers below it. Placing `CMD` before agent `RUN` steps means every agent installation step runs uncached on every build, even when the agent configuration has not changed. With `CMD` last, all `RUN` layers are stable and cached after the first build, reducing subsequent build times from minutes to seconds.
+
+---
+
+### Requirement 22: VS Code Server Persistence Volume
+
+**User Story:** As a developer, I want the VS Code Remote-SSH server binaries and extensions to persist across container restarts and rebuilds, so that I don't have to wait for VS Code to re-download its server component every time I reconnect.
+
+#### Acceptance Criteria
+
+1. WHEN a Container is created, THE CLI SHALL attach a named Docker volume to the Container at the path `<Container_User_Home>/.vscode-server`.
+2. THE named volume SHALL be named `<Container_Name>-vscode-server` (e.g. `bac-my-project-vscode-server`).
+3. THE named volume SHALL persist across Container restarts and Container_Image rebuilds, so that VS Code's server binaries and extensions are retained without re-download.
+4. WHEN `--stop-and-remove` is used, THE CLI SHALL NOT remove the named volume, so that a subsequent session for the same project benefits from the cached VS Code server.
+5. WHEN `--purge` is invoked, THE CLI SHALL remove all named volumes whose name ends with `-vscode-server` and starts with `constants.ContainerNamePrefix` (`bac-`).
+6. THE named volume SHALL NOT be read-only; VS Code requires write access to install and update its server binaries and extensions.

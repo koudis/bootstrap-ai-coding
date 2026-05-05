@@ -33,7 +33,8 @@ Enabled agents:  claude-code, augment-code
 - **Stable SSH identity**: SSH host keys are generated once per project and reused across rebuilds — no `known_hosts` churn
 - **known_hosts consistency**: `~/.ssh/known_hosts` is kept in sync automatically; stale entries are detected and the user is prompted before replacement
 - **Persistent port**: SSH port is chosen once per project and remembered — reconnecting is always the same command
-- **Clean uninstall**: `--purge` removes all containers, images, tool data, and `known_hosts` entries with a confirmation prompt
+- **Clean uninstall**: `--purge` removes all containers, images, volumes, tool data, and `known_hosts` entries with a confirmation prompt
+- **VS Code server caching**: a named Docker volume persists VS Code's Remote-SSH server binaries across container restarts and rebuilds — no re-download on reconnect
 
 ## Primary user
 
@@ -51,4 +52,4 @@ Developers who want to run AI coding agents (Claude Code, Augment Code, etc.) in
 | `--no-update-known-hosts` | Skip automatic `~/.ssh/known_hosts` management for this invocation |
 | `--no-update-ssh-config` | Skip automatic `~/.ssh/config` management for this invocation |
 | `--stop-and-remove` | Stop and remove the container for the given project |
-| `--purge` | Remove all tool data, containers, images, and known_hosts entries (with confirmation) |
+| `--purge` | Remove all tool data, containers, images, volumes, and known_hosts entries (with confirmation) |

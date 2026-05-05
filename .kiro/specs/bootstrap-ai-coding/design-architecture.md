@@ -126,7 +126,7 @@ sequenceDiagram
         CLI->>SSH: SyncSSHConfig(containerName, port, noUpdateSSHConfig)
         CLI->>User: Print session summary (stdout), exit 0
     else Container not running
-        CLI->>Docker: Create container (bind mounts: /workspace + per-agent creds)
+        CLI->>Docker: Create container (bind mounts: /workspace + per-agent creds; named volume: vscode-server)
         CLI->>Docker: Start container
         CLI->>Docker: TCP health-check: wait for sshd on SSH_Port (10s timeout)
         alt sshd timeout
@@ -176,12 +176,14 @@ sequenceDiagram
 
     User->>CLI: bac --purge
     CLI->>CLI: Collect all bac-managed containers and images
+    CLI->>CLI: Collect all bac-managed named volumes (suffix: -vscode-server)
     CLI->>CLI: Collect Tool_Data_Dir root path
     CLI->>User: Print summary of what will be deleted
     CLI->>User: Prompt for confirmation
     alt User confirms
         CLI->>Docker: Stop and remove all bac containers
         CLI->>Docker: Remove all bac images
+        CLI->>Docker: Remove all bac named volumes
         CLI->>DataDir: Delete ~/.config/bootstrap-ai-coding/ recursively
         CLI->>SSH: Remove all known_hosts entries for all bac SSH ports
         CLI->>SSH: Remove all SSH config entries for all bac- containers
@@ -224,6 +226,8 @@ const (
     SSHDirPerm                  = 0o700
     KnownHostsFile              = "~/.ssh/known_hosts"
     SSHConfigFile               = "~/.ssh/config"
+    VSCodeServerPath            = ContainerUserHome + "/.vscode-server"
+    VSCodeServerVolumeSuffix    = "-vscode-server"
     ImageBuildTimeout           = 8 * time.Minute  // Image_Build_Timeout glossary term
 )
 ```
@@ -517,6 +521,54 @@ func IsPortFree(port int) bool
 
 ---
 
+### VS Code Server Persistence Volume
+
+`docker/runner.go` handles attaching a named Docker volume for VS Code's Remote-SSH server cache (Req 22). This eliminates the ~30s download that VS Code performs on every fresh connection.
+
+**Volume naming:** `<Container_Name>` + `constants.VSCodeServerVolumeSuffix` → e.g. `bac-my-project-vscode-server`.
+
+**Mount path:** `constants.VSCodeServerPath` (`/home/dev/.vscode-server`) — this is where VS Code's Remote-SSH extension stores server binaries and extensions.
+
+**Lifecycle:**
+- Created implicitly by Docker on first container start (Docker creates named volumes automatically when referenced in a mount spec).
+- Persists across container restarts and image rebuilds — the volume is independent of the container and image lifecycle.
+- **NOT removed** by `--stop-and-remove` — preserves the cache for the next session.
+- **Removed** by `--purge` — clean slate.
+
+**Implementation in `CreateContainer`:** The `ContainerSpec.Volumes` slice is iterated alongside `Mounts`. Each `VolumeMount` is appended to the Docker SDK's `[]mount.Mount` with `Type: mount.TypeVolume`.
+
+```go
+// In CreateContainer:
+for _, v := range spec.Volumes {
+    mounts = append(mounts, mount.Mount{
+        Type:   mount.TypeVolume,
+        Source: v.Name,       // named volume
+        Target: v.ContainerPath,
+    })
+}
+```
+
+**In `runStart` (cmd/root.go):** The volume is always added to the spec:
+
+```go
+volumes := []dockerpkg.VolumeMount{
+    {
+        Name:          containerName + constants.VSCodeServerVolumeSuffix,
+        ContainerPath: constants.VSCodeServerPath,
+    },
+}
+```
+
+**In `runPurge`:** After removing containers and images, list and remove all Docker volumes whose name starts with `constants.ContainerNamePrefix` and ends with `constants.VSCodeServerVolumeSuffix`:
+
+```go
+func RemoveBACVolumes(ctx context.Context, c *Client) ([]string, error)
+```
+
+**Validates: Req 22.1–22.6**
+
+---
+
 ## Core Data Models
 
 ### Mode
@@ -557,7 +609,8 @@ type ContainerSpec struct {
     Name        string
     ImageTag    string
     Dockerfile  string
-    Mounts      []Mount
+    Mounts      []Mount        // Bind mounts: /workspace + per-agent creds
+    Volumes     []VolumeMount  // Named volumes: VS Code server cache
     SSHPort     int
     Labels      map[string]string
     HostUID     int
@@ -568,6 +621,11 @@ type Mount struct {
     HostPath      string
     ContainerPath string
     ReadOnly      bool
+}
+
+type VolumeMount struct {
+    Name          string // Named volume name (e.g. "bac-my-project-vscode-server")
+    ContainerPath string // Mount target inside container
 }
 ```
 

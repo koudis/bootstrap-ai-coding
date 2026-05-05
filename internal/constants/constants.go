@@ -94,6 +94,17 @@ const (
 	// SSHDirPerm is the permission for the ~/.ssh directory on the Host.
 	// Satisfies Req 18.5.
 	SSHDirPerm = 0o700
+
+	// VSCodeServerPath is the path inside the container where VS Code Remote-SSH
+	// server binaries are stored. A named volume is mounted here to persist them
+	// across container restarts and rebuilds.
+	// Corresponds to the VSCode_Server_Volume glossary term (Req 22.1).
+	VSCodeServerPath = ContainerUserHome + "/.vscode-server"
+
+	// VSCodeServerVolumeSuffix is the suffix appended to the container name to
+	// form the named Docker volume for VS Code server persistence.
+	// Corresponds to the VSCode_Server_Volume glossary term (Req 22.2).
+	VSCodeServerVolumeSuffix = "-vscode-server"
 )
 
 // ImageBuildTimeout is the maximum time allowed for a Docker image build.

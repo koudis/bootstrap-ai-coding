@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/pkg/stdcopy"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
@@ -162,6 +163,14 @@ func (c *Client) ContainerLogs(ctx context.Context, containerID string, options 
 
 func (c *Client) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
 	return c.inner.ImagePull(ctx, refStr, options)
+}
+
+func (c *Client) VolumeList(ctx context.Context, options volume.ListOptions) (volume.ListResponse, error) {
+	return c.inner.VolumeList(ctx, options)
+}
+
+func (c *Client) VolumeRemove(ctx context.Context, volumeID string, force bool) error {
+	return c.inner.VolumeRemove(ctx, volumeID, force)
 }
 
 // --- User conflict detection --------------------------------------------------

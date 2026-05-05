@@ -67,3 +67,33 @@ When both Claude Code and Augment Code are enabled (the default), both agents in
   - [x] 5.1 Run `go build ./...` — must compile cleanly
   - [x] 5.2 Run `go vet -tags integration ./...` — must pass with no warnings
   - [x] 5.3 Run `go test ./...` (unit + PBT only) — must pass (no regressions)
+
+### VS Code Server Persistence Volume (Req 22)
+
+Implement a named Docker volume mounted at `/home/dev/.vscode-server` to persist VS Code Remote-SSH server binaries across container restarts and rebuilds.
+
+- [x] 7. Implement VS Code Server persistence volume
+  - [x] 7.1 Add constants to `internal/constants/constants.go`
+    - Add `VSCodeServerPath = ContainerUserHome + "/.vscode-server"`
+    - Add `VSCodeServerVolumeSuffix = "-vscode-server"`
+  - [x] 7.2 Add `VolumeMount` type and `Volumes` field to `ContainerSpec` in `internal/docker/runner.go`
+    - Add `VolumeMount` struct with `Name string` and `ContainerPath string` fields
+    - Add `Volumes []VolumeMount` field to `ContainerSpec`
+    - Update `CreateContainer` to iterate `spec.Volumes` and append `mount.Mount{Type: mount.TypeVolume, Source: v.Name, Target: v.ContainerPath}` to the mounts slice
+  - [x] 7.3 Add `RemoveBACVolumes` helper to `internal/docker/runner.go`
+    - List all Docker volumes, filter those whose name starts with `constants.ContainerNamePrefix` and ends with `constants.VSCodeServerVolumeSuffix`
+    - Remove each matching volume
+    - Return the list of removed volume names
+  - [x] 7.4 Update `runStart` in `internal/cmd/root.go` to attach the volume
+    - After assembling bind mounts, create a `[]dockerpkg.VolumeMount` with one entry: `{Name: containerName + constants.VSCodeServerVolumeSuffix, ContainerPath: constants.VSCodeServerPath}`
+    - Pass it in the `ContainerSpec.Volumes` field when creating the container
+  - [x] 7.5 Update `runPurge` in `internal/cmd/root.go` to remove volumes
+    - Call `dockerpkg.RemoveBACVolumes(ctx, c)` after removing containers and images
+    - Include removed volume names in the purge confirmation summary
+  - [x] 7.6 Add unit tests
+    - Test that `CreateContainer` includes a volume mount of type `TypeVolume` when `Volumes` is populated
+    - Test that `RemoveBACVolumes` correctly filters volumes by prefix and suffix
+  - [x] 7.7 Verify build and tests pass
+    - Run `go build ./...` — must compile cleanly
+    - Run `go vet ./...` — must pass
+    - Run `go test ./...` — all unit and PBT tests must pass

@@ -84,3 +84,4 @@ import (
 - Manifest file inside image: `/bac-manifest.json` (constants.ManifestFilePath) — lists enabled agent IDs for rebuild detection
 - Default agents: `claude-code,augment-code` (constants.DefaultAgents)
 - File permissions: Tool_Data_Dir `0700` (constants.ToolDataDirPerm), all files within `0600` (constants.ToolDataFilePerm)
+- VS Code server volume: named volume `<container-name>-vscode-server` mounted at `/home/dev/.vscode-server` (constants.VSCodeServerPath) — persists VS Code Remote-SSH server binaries across restarts and rebuilds; kept on `--stop-and-remove`, removed on `--purge`

@@ -361,6 +361,11 @@ func runPurge(c *dockerpkg.Client) error {
 		}
 	}
 
+	removedVolumes, err := dockerpkg.RemoveBACVolumes(ctx, c)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: removing volumes: %v\n", err)
+	}
+
 	if err := datadir.PurgeRoot(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: purging data dir: %v\n", err)
 	}
@@ -377,8 +382,8 @@ func runPurge(c *dockerpkg.Client) error {
 		fmt.Fprintf(os.Stderr, "warning: removing SSH config entries: %v\n", cfgErr)
 	}
 
-	fmt.Printf("Purge complete: removed %d container(s), %d image(s), and tool data.\n",
-		len(containers), len(images))
+	fmt.Printf("Purge complete: removed %d container(s), %d image(s), %d volume(s), and tool data.\n",
+		len(containers), len(images), len(removedVolumes))
 	return nil
 }
 
@@ -598,10 +603,15 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		})
 	}
 
+	volumes := []dockerpkg.VolumeMount{
+		{Name: containerName + constants.VSCodeServerVolumeSuffix, ContainerPath: constants.VSCodeServerPath},
+	}
+
 	spec := dockerpkg.ContainerSpec{
 		Name:     containerName,
 		ImageTag: imageTag,
 		Mounts:   mounts,
+		Volumes:  volumes,
 		SSHPort:  sshPort,
 		Labels:   labels,
 	}

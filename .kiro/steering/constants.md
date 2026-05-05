@@ -38,6 +38,8 @@ This means:
 | `KnownHostsFile` | `"~/.ssh/known_hosts"` | Known_Hosts_File (Req 18) |
 | `SSHConfigFile` | `"~/.ssh/config"` | SSH_Config_File (Req 19) |
 | `SSHDirPerm` | `0o700` | ~/.ssh directory permissions (Req 18.5) |
+| `VSCodeServerPath` | `ContainerUserHome + "/.vscode-server"` | VSCode_Server_Volume mount path (Req 22.1) |
+| `VSCodeServerVolumeSuffix` | `"-vscode-server"` | VSCode_Server_Volume name suffix (Req 22.2) |
 | `ImageBuildTimeout` | `8 * time.Minute` | Image_Build_Timeout (Req 14.7) |
 
 ### Variables (not const — Go does not support slice/map constants)

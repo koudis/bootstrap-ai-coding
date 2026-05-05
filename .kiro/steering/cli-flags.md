@@ -94,7 +94,7 @@ Stop and remove the container for the given project path.
 
 - Works whether the container is running or stopped
 - Does nothing (with a message) if no container exists for the project
-- Does **not** delete the `Tool_Data_Dir` or the container image
+- Does **not** delete the `Tool_Data_Dir`, the container image, or the VS Code server named volume
 - Removes the `known_hosts` entries for the project's SSH_Port (both `localhost` and `127.0.0.1` forms)
 - Removes the SSH config entry for the project's Container name from `~/.ssh/config`
 - **Validates:** Req 5.3, 5.4, 18.7, 19.7
@@ -107,11 +107,12 @@ Remove all data the tool has stored on the host.
 
 - Stops and removes all bac-managed containers
 - Removes all bac-managed Docker images
+- Removes all bac-managed named volumes (VS Code server cache)
 - Deletes the entire `~/.config/bootstrap-ai-coding/` directory
 - Removes all `known_hosts` entries for all SSH_Ports managed by the tool
 - Removes all SSH config entries for all bac-managed containers from `~/.ssh/config`
 - Requires explicit confirmation before any destructive action
-- **Validates:** Req 16.1–16.6, 18.8, 19.8
+- **Validates:** Req 16.1–16.6, 18.8, 19.8, 22.5
 
 ---
 

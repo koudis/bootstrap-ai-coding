@@ -29,9 +29,10 @@ The tool:
 1. Checks you are not running as root and that Docker is available (≥ 20.10)
 2. Builds a Docker image on demand (`ubuntu:26.04` base, SSH server, non-root `dev` user, enabled AI agents)
 3. Mounts your project directory into the container at `/workspace`
-4. Starts the container with an SSH server bound to a persisted port (default: 2222+)
-5. Keeps `~/.ssh/known_hosts` and `~/.ssh/config` in sync so you can connect immediately
-6. Prints a session summary
+4. Attaches a named Docker volume for VS Code Server persistence (no re-download on reconnect)
+5. Starts the container with an SSH server bound to a persisted port (default: 2222+)
+6. Keeps `~/.ssh/known_hosts` and `~/.ssh/config` in sync so you can connect immediately
+7. Prints a session summary
 
 ```
 Data directory:  ~/.config/bootstrap-ai-coding/bac-myproject/
@@ -90,7 +91,7 @@ Stops and removes the container. Does not delete the image or tool data — the 
 bac --purge
 ```
 
-Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-coding/`), `known_hosts` entries, and SSH config entries. Requires confirmation.
+Removes all bac-managed containers, images, named volumes, tool data (`~/.config/bootstrap-ai-coding/`), `known_hosts` entries, and SSH config entries. Requires confirmation.
 
 ## Flags
 
@@ -104,7 +105,7 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | `--no-update-known-hosts` | Skip automatic `~/.ssh/known_hosts` management |
 | `--no-update-ssh-config` | Skip automatic `~/.ssh/config` management |
 | `--stop-and-remove` | Stop and remove the container for the given project |
-| `--purge` | Remove all tool data, containers, and images (with confirmation) |
+| `--purge` | Remove all tool data, containers, images, and volumes (with confirmation) |
 | `--version` | Print the version and exit |
 
 ## Supported Agents
@@ -171,6 +172,13 @@ Per-project state is stored in `~/.config/bootstrap-ai-coding/<container-name>/`
 | `ssh_host_ed25519_key.pub` | SSH host public key |
 
 The SSH host key is stable across rebuilds — no `known_hosts` churn.
+
+## VS Code Server caching
+
+A named Docker volume (`<container-name>-vscode-server`) is mounted at `/home/dev/.vscode-server` inside the container. This persists VS Code's Remote-SSH server binaries across container restarts and rebuilds — no re-download when you reconnect.
+
+- The volume survives `--stop-and-remove` (only the container is removed)
+- The volume is removed by `--purge` (full cleanup)
 
 ## Container naming
 

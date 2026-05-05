@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/go-connections/nat"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
@@ -30,12 +31,19 @@ type Mount struct {
 	ReadOnly      bool
 }
 
+// VolumeMount represents a named Docker volume to mount into the container.
+type VolumeMount struct {
+	Name          string // Docker volume name
+	ContainerPath string // Mount target inside the container
+}
+
 // ContainerSpec is the fully resolved specification for a container.
 type ContainerSpec struct {
 	Name       string            // Deterministic container name (bac-<12hex>)
 	ImageTag   string            // Docker image tag (derived from container name)
 	Dockerfile string            // Complete Dockerfile content (assembled by DockerfileBuilder)
 	Mounts     []Mount           // All bind mounts: /workspace + per-agent credential stores
+	Volumes    []VolumeMount     // Named volumes (e.g. VS Code server persistence)
 	SSHPort    int               // Host-side TCP port mapped to container port 22
 	Labels     map[string]string // Docker labels for identification
 	HostUID    int               // Host user UID (passed as build arg for dev user)
@@ -165,6 +173,13 @@ func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string
 			Source:   m.HostPath,
 			Target:   m.ContainerPath,
 			ReadOnly: m.ReadOnly,
+		})
+	}
+	for _, v := range spec.Volumes {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeVolume,
+			Source: v.Name,
+			Target: v.ContainerPath,
 		})
 	}
 
@@ -304,6 +319,35 @@ func ListBACImages(ctx context.Context, c *Client) ([]image.Summary, error) {
 		}
 	}
 	return images, nil
+}
+
+// IsBACVolumeName reports whether the given volume name matches the pattern for
+// a bac-managed VS Code server volume: starts with constants.ContainerNamePrefix
+// and ends with constants.VSCodeServerVolumeSuffix.
+func IsBACVolumeName(name string) bool {
+	return strings.HasPrefix(name, constants.ContainerNamePrefix) &&
+		strings.HasSuffix(name, constants.VSCodeServerVolumeSuffix)
+}
+
+// RemoveBACVolumes lists all Docker volumes, filters those matching the bac
+// VS Code server volume naming pattern, removes each one, and returns the list
+// of removed volume names.
+func RemoveBACVolumes(ctx context.Context, c *Client) ([]string, error) {
+	resp, err := c.VolumeList(ctx, volume.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("listing volumes: %w", err)
+	}
+
+	var removed []string
+	for _, v := range resp.Volumes {
+		if IsBACVolumeName(v.Name) {
+			if err := c.VolumeRemove(ctx, v.Name, true); err != nil {
+				return removed, fmt.Errorf("removing volume %s: %w", v.Name, err)
+			}
+			removed = append(removed, v.Name)
+		}
+	}
+	return removed, nil
 }
 
 // ExecInContainer runs a command inside a running container and returns the exit code.

@@ -1,6 +1,6 @@
-// Package portfinder provides SSH port auto-selection starting at
+// Package datadir portfinder.go provides SSH port auto-selection starting at
 // constants.SSHPortStart, incrementing until a free TCP port is found.
-package portfinder
+package datadir
 
 import (
 	"fmt"

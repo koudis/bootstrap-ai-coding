@@ -22,7 +22,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **Public_Key**: The user's SSH public key used to authenticate into the Container without a password.
 - **Session**: A single lifecycle of a Container from creation to termination.
 - **Base_Container_Image**: The base Docker image for all Containers: `ubuntu:26.04` (Ubuntu 26.04 LTS "Resolute Raccoon"). No other base image or Ubuntu version shall be used.
-- **Container_User**: The non-root OS user account inside the Container under which SSH sessions run. Username is `dev`; UID and GID match those of the Host_User who invoked the CLI.
+- **Container_User**: The non-root OS user account inside the Container under which SSH sessions run. Username matches the Host_User's username; UID and GID match those of the Host_User who invoked the CLI.
 - **Conflicting_Image_User**: An existing user in the Base_Container_Image whose UID or GID matches the Host_User's UID or GID. If present, must be resolved before the Container_Image can be built (see Requirement 10a).
 - **Container_Image**: The Docker image built on top of the Base_Container_Image that includes the SSH server, the Container_User setup, and all Enabled_Agent installations.
 - **Agent**: An AI coding assistant module that conforms to the Agent_Interface and can be installed, authenticated, and invoked inside the Container.
@@ -32,7 +32,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **Credential_Store**: The directory on the Host where an Agent's authentication tokens are persisted between Sessions. Each Agent module declares its own default Credential_Store path via the Agent_Interface.
 - **Credential_Volume**: The Docker bind-mount that makes an Agent's Credential_Store accessible inside the Container at the path the Agent expects.
 - **SSH_Port**: The host-side TCP port mapped to port 22 inside the Container. The CLI selects the SSH_Port by starting at `2222` and incrementing by 1 until a free port is found on the Host. The selected port is persisted in the Tool_Data_Dir for the project so the same port is reused on subsequent runs. Can be overridden per invocation via `--port`.
-- **Container_User_Home**: The home directory of the Container_User inside the Container. Defined as `/home/<Container_User>` where `<Container_User>` is the username defined in the Container_User glossary entry.
+- **Container_User_Home**: The home directory of the Container_User inside the Container. Defined as the Host_User's home directory path (e.g. `/home/alice`). This ensures absolute paths stored by tools resolve identically inside the Container and on the Host.
 - **Tool_Data_Dir**: The directory on the Host where the CLI stores all persistent data for a given project (SSH host keys, SSH port assignment, agent manifests). Located at `~/.config/bootstrap-ai-coding/<container-name>/`.
 - **Known_Hosts_File**: The SSH client's `~/.ssh/known_hosts` file on the Host.
 - **Known_Hosts_Entry**: A line in the Known_Hosts_File that associates a host pattern (`[localhost]:<SSH_Port>` or `127.0.0.1:<SSH_Port>`) with the Container's SSH host public key.
@@ -184,6 +184,8 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 4. THE Container_User SHALL have passwordless `sudo` access inside the Container to allow installation of additional tools during a session.
 5. THE CLI SHALL pass the Host_User's UID and GID to the Container at creation time.
 6. Files written to `/workspace` inside the Container SHALL be owned by the Host_User's UID/GID on the Host filesystem.
+7. THE Container_User's username SHALL match the Host_User's username on the Host.
+8. THE Container_User_Home inside the Container SHALL match the Host_User's home directory path on the Host, so that absolute paths in bind-mounted configuration files (e.g. plugin caches, marketplace metadata) resolve correctly inside the Container.
 
 ---
 
@@ -333,7 +335,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
    - `Host <container-name>`
    - `HostName localhost`
    - `Port <SSH_Port>`
-   - `User dev` (constants.ContainerUser)
+   - `User <host-username>` (the Host_User's username, which matches the Container_User)
    - `StrictHostKeyChecking yes` — `IdentityFile` is intentionally omitted: the container already has the user's public key installed in `authorized_keys` (Requirement 4), and the host key is kept consistent in `known_hosts` (Requirement 18), so SSH will authenticate and verify correctly without an explicit key path in the config entry.
 3. IF a matching entry exists and all fields match the current SSH_Port and Container_User, THE CLI SHALL leave `~/.ssh/config` unchanged.
 4. IF a matching entry exists but one or more fields do not match the current values (e.g. the SSH_Port changed), THE CLI SHALL replace the stale entry with the correct one and print a message to stdout confirming the update.
@@ -373,4 +375,17 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 5. Agent modules SHALL append only `RUN` (and optionally `ENV`, `COPY`) instructions via `Install()` — never `CMD` or `FROM`.
 
 > **Rationale:** Docker's layer cache is sequential. Any instruction that changes invalidates all layers below it. Placing `CMD` before agent `RUN` steps means every agent installation step runs uncached on every build, even when the agent configuration has not changed. With `CMD` last, all `RUN` layers are stable and cached after the first build, reducing subsequent build times from minutes to seconds.
+
+---
+
+### Requirement 22: Dynamic Container User Identity
+
+**User Story:** As a developer, I want the container user's username and home directory to match my host user exactly, so that absolute paths in bind-mounted configuration files (e.g. Claude Code plugin caches, marketplace git metadata) resolve correctly inside the container without path translation.
+
+#### Acceptance Criteria
+
+1. THE Container_User's username SHALL be the Host_User's username (not a hardcoded value).
+2. THE Container_User_Home SHALL be the Host_User's home directory path (not a hardcoded value).
+3. THE Container_User username and Container_User_Home SHALL be determined before any Docker or SSH operations begin and used consistently across all operations (Dockerfile generation, credential mount paths, SSH config entries).
+4. THE CLI SHALL only support Linux hosts. No macOS home directory path translation is required.
 

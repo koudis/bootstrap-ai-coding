@@ -175,7 +175,7 @@ func TestContainerStartsAndSSHConnects(t *testing.T) {
 ## Coverage Target
 
 ≥ 80% line coverage on all non-integration packages:
-- `internal/constants/`, `internal/naming/`, `internal/ssh/`, `internal/credentials/`, `internal/datadir/`, `internal/portfinder/`, `internal/agent/`, `internal/docker/builder.go`, `internal/agents/claude/`
+- `internal/constants/`, `internal/naming/`, `internal/ssh/`, `internal/datadir/`, `internal/agent/`, `internal/docker/builder.go`, `internal/agents/claude/`
 
 Check coverage:
 ```bash

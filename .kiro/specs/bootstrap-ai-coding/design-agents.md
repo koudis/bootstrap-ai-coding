@@ -6,8 +6,10 @@ An agent module is a Go package under `internal/agents/`. It must:
 
 1. Define a private struct that implements the `agent.Agent` interface.
 2. Call `agent.Register()` in its `init()` function.
-3. Import only `internal/agent`, `internal/docker`, and `internal/constants` from the core — never `internal/cmd`, `internal/naming`, `internal/ssh`, `internal/credentials`, `internal/datadir`, `internal/portfinder`, or `internal/docker/runner`.
+3. Import only `internal/agent`, `internal/docker`, and `internal/constants` from the core — never `internal/cmd`, `internal/naming`, `internal/ssh`, `internal/datadir`, or `internal/docker/runner`.
 4. Be wired into the binary via a blank import in `main.go`.
+5. Use `b.HomeDir()` (from `DockerfileBuilder`) in `Install()` for container-side paths that reference the user's home directory (Req 22).
+6. Accept `homeDir string` in `ContainerMountPath()` — the runtime-resolved value from `*hostinfo.Info` — instead of referencing any hardcoded constant.
 
 No other file in the repository needs to change when a new agent module is added.
 
@@ -24,6 +26,7 @@ package claude
 
 import (
     "context"
+    "fmt"
     "os"
     "path/filepath"
 
@@ -44,10 +47,18 @@ func init() {
 func (c *claudeAgent) ID() string { return agentID }
 
 // Install contributes Node.js LTS + Claude Code npm package install steps. (CC-2)
+// The builder exposes HomeDir() for constructing paths inside the container (Req 22).
 func (c *claudeAgent) Install(b *docker.DockerfileBuilder) {
     b.Run("apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git && rm -rf /var/lib/apt/lists/*")
     b.Run("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*")
     b.Run("npm install -g @anthropic-ai/claude-code")
+    // Symlink ~/.claude.json into the credential mount directory (CC-8)
+    // Uses b.HomeDir() to get the runtime-resolved Container_User_Home from *hostinfo.Info (Req 22)
+    b.Run(fmt.Sprintf(
+        "ln -sf %s/claude.json %s/.claude.json",
+        filepath.Join(b.HomeDir(), ".claude"),
+        b.HomeDir(),
+    ))
 }
 
 // CredentialStorePath returns the default host-side credential directory. (CC-3)
@@ -57,8 +68,9 @@ func (c *claudeAgent) CredentialStorePath() string {
 }
 
 // ContainerMountPath returns where credentials are mounted inside the container. (CC-3)
-func (c *claudeAgent) ContainerMountPath() string {
-    return filepath.Join(constants.ContainerUserHome, ".claude")
+// homeDir is the runtime-resolved Container_User_Home from info.HomeDir (Req 22).
+func (c *claudeAgent) ContainerMountPath(homeDir string) string {
+    return filepath.Join(homeDir, ".claude")
 }
 
 // HasCredentials checks for ~/.claude/.credentials.json. (CC-4)
@@ -72,8 +84,8 @@ func (c *claudeAgent) HasCredentials(storePath string) (bool, error) {
 }
 
 // HealthCheck verifies `claude --version` exits 0 inside the container. (CC-5)
-func (c *claudeAgent) HealthCheck(ctx context.Context, containerID string) error {
-    return execInContainer(ctx, containerID, []string{"claude", "--version"})
+func (c *claudeAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
+    return docker.ExecInContainer(ctx, c, containerID, []string{"claude", "--version"})
 }
 ```
 
@@ -128,8 +140,9 @@ func (a *augmentAgent) CredentialStorePath() string {
 }
 
 // ContainerMountPath returns where credentials are mounted inside the container. (AC-3)
-func (a *augmentAgent) ContainerMountPath() string {
-    return filepath.Join(constants.ContainerUserHome, ".augment")
+// homeDir is the runtime-resolved Container_User_Home from info.HomeDir (Req 22).
+func (a *augmentAgent) ContainerMountPath(homeDir string) string {
+    return filepath.Join(homeDir, ".augment")
 }
 
 // HasCredentials checks whether ~/.augment/ is non-empty (contains any file). (AC-4)
@@ -155,8 +168,8 @@ func (a *augmentAgent) HasCredentials(storePath string) (bool, error) {
 }
 
 // HealthCheck verifies `auggie --version` exits 0 inside the container. (AC-5)
-func (a *augmentAgent) HealthCheck(ctx context.Context, containerID string) error {
-    exitCode, err := docker.ExecInContainer(ctx, containerID, []string{"auggie", "--version"})
+func (a *augmentAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
+    exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"auggie", "--version"})
     if err != nil {
         return fmt.Errorf("augment health check failed: %w", err)
     }
@@ -190,3 +203,5 @@ To add a new agent (e.g. `agents/aider/aider.go`):
 4. Add a section to `requirements-agents.md` documenting the new agent's requirements.
 
 No other files change.
+
+**Note (Req 22):** `ContainerMountPath(homeDir string)` receives the runtime-resolved Container_User_Home from `info.HomeDir` (via `*hostinfo.Info`). Agent modules must use this parameter (not a hardcoded path) to construct their container-side credential mount path. The `DockerfileBuilder` also exposes `HomeDir()` for use in `Install()` steps that need to reference the container user's home directory.

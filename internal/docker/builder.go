@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
 // UserStrategy controls how the Container_User is created inside the image.
@@ -25,8 +26,19 @@ const (
 // The full implementation is provided here; agent modules use this type
 // via the Agent.Install method.
 type DockerfileBuilder struct {
+	info          *hostinfo.Info
 	lines         []string
 	nodeInstalled bool
+}
+
+// Username returns the host user's username from the Info struct.
+func (b *DockerfileBuilder) Username() string {
+	return b.info.Username
+}
+
+// HomeDir returns the host user's home directory from the Info struct.
+func (b *DockerfileBuilder) HomeDir() string {
+	return b.info.HomeDir
 }
 
 // MarkNodeInstalled records that a Node.js installation step has already been
@@ -55,7 +67,7 @@ func (b *DockerfileBuilder) IsNodeInstalled() bool {
 //   - mkdir -p /run/sshd
 //   - CMD ["/usr/sbin/sshd", "-D"]
 //
-// uid and gid are the host user's effective UID/GID.
+// uid and gid are derived from info.UID and info.GID (the host user's effective UID/GID).
 // publicKey is the content of the user's SSH public key.
 // hostKeyPriv and hostKeyPub are the persisted SSH host key pair contents
 // (key type is always constants.SSHHostKeyType).
@@ -63,8 +75,8 @@ func (b *DockerfileBuilder) IsNodeInstalled() bool {
 // or an existing conflicting user is renamed (UserStrategyRename).
 // conflictingUser is the name of the existing user to rename; it is ignored
 // when strategy == UserStrategyCreate.
-func NewDockerfileBuilder(uid, gid int, publicKey, hostKeyPriv, hostKeyPub string, strategy UserStrategy, conflictingUser string) *DockerfileBuilder {
-	b := &DockerfileBuilder{}
+func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string, strategy UserStrategy, conflictingUser string) *DockerfileBuilder {
+	b := &DockerfileBuilder{info: info}
 
 	// 1. Base image
 	b.From(constants.BaseContainerImage)
@@ -78,34 +90,34 @@ func NewDockerfileBuilder(uid, gid int, publicKey, hostKeyPriv, hostKeyPub strin
 		// A user already owns the requested UID/GID; rename it to Container_User.
 		b.Run(fmt.Sprintf(
 			"usermod -l %s %s && usermod -d %s -m %s && groupmod -n %s %s",
-			constants.ContainerUser, conflictingUser,
-			constants.ContainerUserHome, constants.ContainerUser,
-			constants.ContainerUser, conflictingUser,
+			info.Username, conflictingUser,
+			info.HomeDir, info.Username,
+			info.Username, conflictingUser,
 		))
 	default: // UserStrategyCreate
 		b.Run(fmt.Sprintf(
 			"groupadd --gid %d %s && useradd --uid %d --gid %d --create-home --shell /bin/bash %s",
-			gid, constants.ContainerUser, uid, gid, constants.ContainerUser,
+			info.GID, info.Username, info.UID, info.GID, info.Username,
 		))
 	}
 
 	// 4. Passwordless sudo for Container_User
 	b.Run(fmt.Sprintf(
 		"echo '%s ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers.d/%s && chmod 0440 /etc/sudoers.d/%s",
-		constants.ContainerUser, constants.ContainerUser, constants.ContainerUser,
+		info.Username, info.Username, info.Username,
 	))
 
 	// 5. Install SSH public key for Container_User
 	// %q is used to safely quote the key content so special characters are escaped.
 	b.Run(fmt.Sprintf(
 		"mkdir -p %s/.ssh && echo %s >> %s/.ssh/authorized_keys && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys && chown -R %s:%s %s/.ssh",
-		constants.ContainerUserHome,
+		info.HomeDir,
 		fmt.Sprintf("%q", publicKey),
-		constants.ContainerUserHome,
-		constants.ContainerUserHome,
-		constants.ContainerUserHome,
-		constants.ContainerUser, constants.ContainerUser,
-		constants.ContainerUserHome,
+		info.HomeDir,
+		info.HomeDir,
+		info.HomeDir,
+		info.Username, info.Username,
+		info.HomeDir,
 	))
 
 	// 6. Inject persisted SSH host key pair (type: constants.SSHHostKeyType)

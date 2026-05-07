@@ -14,11 +14,14 @@ import (
 	internalssh "github.com/koudis/bootstrap-ai-coding/internal/ssh"
 )
 
+// testUser is the username used in SSH config test stanzas.
+const testUser = "testuser"
+
 // sshConfigStanzaText returns a minimal SSH config stanza string for the given
-// host name and port, matching the format produced by buildStanza in ssh_config.go.
-func sshConfigStanzaText(name string, port int) string {
+// host name, port, and user, matching the format produced by buildStanza in ssh_config.go.
+func sshConfigStanzaText(name string, port int, user string) string {
 	return fmt.Sprintf("Host %s\n    HostName localhost\n    Port %d\n    User %s\n    StrictHostKeyChecking yes\n",
-		name, port, constants.ContainerUser)
+		name, port, user)
 }
 
 // writeSSHConfigFile creates ~/.ssh/config in tmpHome with the provided content.
@@ -58,7 +61,7 @@ func TestSyncSSHConfigPreservesUnrelatedEntries(t *testing.T) {
 		for i := 0; i < n; i++ {
 			name := nonBacNames[i%len(nonBacNames)] + fmt.Sprintf("-%d", i)
 			port := 22 + i
-			initialContent.WriteString(sshConfigStanzaText(name, port))
+			initialContent.WriteString(sshConfigStanzaText(name, port, testUser))
 			if i < n-1 {
 				initialContent.WriteByte('\n')
 			}
@@ -70,7 +73,7 @@ func TestSyncSSHConfigPreservesUnrelatedEntries(t *testing.T) {
 		}
 
 		// Call SyncSSHConfig with a bac- prefixed container name.
-		err := internalssh.SyncSSHConfig("bac-testproject", 2222, false)
+		err := internalssh.SyncSSHConfig("bac-testproject", 2222, testUser, false)
 		require.NoError(rt, err)
 
 		// Read the file back and assert all N original stanzas are still present.
@@ -101,7 +104,7 @@ func TestRemoveSSHConfigEntryOnlyRemovesTarget(t *testing.T) {
 		// Write SSH config entries for each container.
 		var sb strings.Builder
 		for i, name := range names {
-			sb.WriteString(sshConfigStanzaText(name, 2222+i))
+			sb.WriteString(sshConfigStanzaText(name, 2222+i, testUser))
 			if i < numContainers-1 {
 				sb.WriteByte('\n')
 			}
@@ -137,13 +140,13 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
 		port := rapid.IntRange(1024, 65535).Draw(rt, "port")
 
 		// First call — file may not exist yet.
-		err := internalssh.SyncSSHConfig(name, port, false)
+		err := internalssh.SyncSSHConfig(name, port, testUser, false)
 		require.NoError(rt, err)
 
 		contentAfterFirst := readSSHConfigFile(t, tmpHome)
 
 		// Second call — entry already exists and matches, so it should be a no-op.
-		err = internalssh.SyncSSHConfig(name, port, false)
+		err = internalssh.SyncSSHConfig(name, port, testUser, false)
 		require.NoError(rt, err)
 
 		contentAfterSecond := readSSHConfigFile(t, tmpHome)
@@ -177,7 +180,7 @@ func TestRemoveAllBACSSHConfigEntriesOnlyRemovesBacEntries(t *testing.T) {
 		var sb strings.Builder
 		allNames := append(bacNames, nonBacNames...)
 		for i, name := range allNames {
-			sb.WriteString(sshConfigStanzaText(name, 2222+i))
+			sb.WriteString(sshConfigStanzaText(name, 2222+i, testUser))
 			if i < len(allNames)-1 {
 				sb.WriteByte('\n')
 			}
@@ -204,6 +207,41 @@ func TestRemoveAllBACSSHConfigEntriesOnlyRemovesBacEntries(t *testing.T) {
 	})
 }
 
+// Feature: bootstrap-ai-coding, Property 58: SSH config entry uses runtime-provided username
+func TestPropertySSHConfigUsesRuntimeUsername(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		// Draw a random valid container name (regex: bac-[a-z][a-z0-9-]{0,20})
+		containerName := rapid.StringMatching(`bac-[a-z][a-z0-9\-]{0,20}`).Draw(rt, "containerName")
+
+		// Draw a random port in range 1024-65535
+		port := rapid.IntRange(1024, 65535).Draw(rt, "port")
+
+		// Draw a random valid Linux username (regex: [a-z][a-z0-9_-]{0,15})
+		username := rapid.StringMatching(`[a-z][a-z0-9_\-]{0,15}`).Draw(rt, "username")
+
+		// Call SyncSSHConfig with the drawn values
+		err := internalssh.SyncSSHConfig(containerName, port, username, false)
+		require.NoError(rt, err)
+
+		// Read the resulting SSH config file
+		content := readSSHConfigFile(t, tmpHome)
+
+		// Assert it contains User <username>
+		expectedUserLine := fmt.Sprintf("User %s", username)
+		require.Contains(rt, content, expectedUserLine,
+			"SSH config must contain User %s for container %s", username, containerName)
+
+		// If username is NOT "dev", assert it does NOT contain "User dev"
+		if username != "dev" {
+			require.NotContains(rt, content, "User dev",
+				"SSH config must not contain hardcoded 'User dev' when username is %q", username)
+		}
+	})
+}
+
 // ── Unit tests for ssh_config scenarios ──────────────────────────────────────
 
 // TestSSHConfigEntryAddedOnStart verifies that when no stanza exists for the
@@ -216,12 +254,12 @@ func TestSSHConfigEntryAddedOnStart(t *testing.T) {
 	const name = "bac-myproject"
 	const port = 2222
 
-	require.NoError(t, internalssh.SyncSSHConfig(name, port, false))
+	require.NoError(t, internalssh.SyncSSHConfig(name, port, testUser, false))
 
 	content := readSSHConfigFile(t, tmpHome)
 	require.Contains(t, content, fmt.Sprintf("Host %s", name))
 	require.Contains(t, content, fmt.Sprintf("Port %d", port))
-	require.Contains(t, content, fmt.Sprintf("User %s", constants.ContainerUser))
+	require.Contains(t, content, fmt.Sprintf("User %s", testUser))
 	require.Contains(t, content, "HostName localhost")
 	require.Contains(t, content, "StrictHostKeyChecking yes")
 }
@@ -237,10 +275,10 @@ func TestSSHConfigNoChangeWhenEntryMatches(t *testing.T) {
 	const port = 2222
 
 	// Write a pre-existing matching stanza.
-	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText(name, port))
+	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText(name, port, testUser))
 	before := readSSHConfigFile(t, tmpHome)
 
-	require.NoError(t, internalssh.SyncSSHConfig(name, port, false))
+	require.NoError(t, internalssh.SyncSSHConfig(name, port, testUser, false))
 
 	after := readSSHConfigFile(t, tmpHome)
 	require.Equal(t, before, after, "file must not change when entry already matches")
@@ -261,9 +299,9 @@ func TestSSHConfigStaleEntryReplaced(t *testing.T) {
 	const newPort = 2223
 
 	// Write a stanza with the old port.
-	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText(name, oldPort))
+	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText(name, oldPort, testUser))
 
-	require.NoError(t, internalssh.SyncSSHConfig(name, newPort, false))
+	require.NoError(t, internalssh.SyncSSHConfig(name, newPort, testUser, false))
 
 	content := readSSHConfigFile(t, tmpHome)
 	require.Contains(t, content, fmt.Sprintf("Port %d", newPort), "stale port must be replaced with new port")
@@ -283,7 +321,7 @@ func TestSSHConfigEntryRemovedOnStopAndRemove(t *testing.T) {
 	const name = "bac-myproject"
 	const port = 2222
 
-	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText(name, port))
+	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText(name, port, testUser))
 
 	require.NoError(t, internalssh.RemoveSSHConfigEntry(name))
 
@@ -303,7 +341,7 @@ func TestSSHConfigSkippedWithNoUpdateFlag(t *testing.T) {
 	const port = 2222
 
 	// File does not exist yet — noUpdate should prevent creation.
-	require.NoError(t, internalssh.SyncSSHConfig(name, port, true))
+	require.NoError(t, internalssh.SyncSSHConfig(name, port, testUser, true))
 
 	content := readSSHConfigFile(t, tmpHome)
 	require.Empty(t, content, "SSH config file must not be created when noUpdate=true")
@@ -325,7 +363,7 @@ func TestRemoveSSHConfigEntryNoopWhenStanzaAbsent(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText("bac-other", 2222))
+	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText("bac-other", 2222, testUser))
 	before := readSSHConfigFile(t, tmpHome)
 
 	require.NoError(t, internalssh.RemoveSSHConfigEntry("bac-notpresent"))
@@ -349,7 +387,7 @@ func TestRemoveAllBACSSHConfigEntriesNoopWhenNoBacEntries(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText("myserver", 22))
+	writeSSHConfigFile(t, tmpHome, sshConfigStanzaText("myserver", 22, testUser))
 	before := readSSHConfigFile(t, tmpHome)
 
 	require.NoError(t, internalssh.RemoveAllBACSSHConfigEntries())

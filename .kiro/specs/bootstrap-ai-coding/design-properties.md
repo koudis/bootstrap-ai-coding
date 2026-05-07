@@ -34,17 +34,17 @@
 
 #### Property 4: Generated Dockerfile always includes SSH server and Container_User
 
-*For any* set of enabled agents (including empty), the Dockerfile produced by `DockerfileBuilder` SHALL contain a `RUN` instruction that installs `openssh-server`, a `RUN` instruction that creates the `constants.ContainerUser` user with the correct UID/GID, and a `CMD` that starts `sshd`.
+*For any* set of enabled agents (including empty) and any valid runtime-resolved username, the Dockerfile produced by `DockerfileBuilder` SHALL contain a `RUN` instruction that installs `openssh-server`, a `RUN` instruction that creates the specified username with the correct UID/GID, and a `CMD` that starts `sshd`.
 
-**Validates: Req 3.1, 10.1**
+**Validates: Req 3.1, 10.1, 22.4**
 
 ---
 
 #### Property 5: Container_User UID and GID always match the host user
 
-*For any* host UID and GID values, the Dockerfile produced by `DockerfileBuilder` SHALL contain either `useradd` arguments (UserStrategyCreate) or `usermod -l` arguments (UserStrategyRename) that result in the Container_User having the host UID and GID.
+*For any* host UID and GID values and any valid runtime-resolved username, the Dockerfile produced by `DockerfileBuilder` SHALL contain either `useradd` arguments (UserStrategyCreate) or `usermod -l` arguments (UserStrategyRename) that result in the specified username having the host UID and GID.
 
-**Validates: Req 10.2, 10.3, 10.5**
+**Validates: Req 10.2, 10.3, 10.5, 22.4**
 
 ---
 
@@ -86,11 +86,11 @@
 
 ---
 
-#### Property 8: Public key is always injected into constants.ContainerUserHome/.ssh/authorized_keys
+#### Property 8: Public key is always injected into Container_User_Home/.ssh/authorized_keys
 
-*For any* non-empty public key string, the Dockerfile SHALL contain a `RUN` instruction that appends that exact key to `constants.ContainerUserHome + "/.ssh/authorized_keys"`.
+*For any* non-empty public key string and any valid runtime-resolved home directory, the Dockerfile SHALL contain a `RUN` instruction that appends that exact key to `<homeDir>/.ssh/authorized_keys`.
 
-**Validates: Req 4.2**
+**Validates: Req 4.2, 22.4**
 
 ---
 
@@ -330,11 +330,11 @@
 
 ---
 
-#### Property 30: Claude Code container mount path is always constants.ContainerUserHome/.claude
+#### Property 30: Claude Code container mount path is always <homeDir>/.claude
 
-*For any* invocation, `claudeAgent.ContainerMountPath()` SHALL always return `constants.ContainerUserHome + "/.claude"`.
+*For any* valid runtime-resolved home directory, `claudeAgent.ContainerMountPath(homeDir)` SHALL always return `homeDir + "/.claude"`.
 
-**Validates: Agent Req CC-3**
+**Validates: Agent Req CC-3, Req 22.4**
 
 ---
 
@@ -362,11 +362,11 @@
 
 ---
 
-#### Property 47: Augment Code container mount path is always constants.ContainerUserHome/.augment
+#### Property 47: Augment Code container mount path is always <homeDir>/.augment
 
-*For any* invocation, `augmentAgent.ContainerMountPath()` SHALL always return `filepath.Join(constants.ContainerUserHome, ".augment")`.
+*For any* valid runtime-resolved home directory, `augmentAgent.ContainerMountPath(homeDir)` SHALL always return `filepath.Join(homeDir, ".augment")`.
 
-**Validates: Agent Req AC-3**
+**Validates: Agent Req AC-3, Req 22.4**
 
 ---
 
@@ -435,6 +435,32 @@
 *For any* Dockerfile containing at least one `RUN` instruction, a `BuildImageWithTimeout` call with `verbose == true` SHALL result in at least one non-empty `stream` line being written to stdout before the build completes successfully.
 
 **Validates: Req 20.3**
+
+---
+
+### Runtime Container User Identity Properties (Req 22)
+
+#### Property 52: Dockerfile uses runtime-provided username and home directory
+
+*For any* valid Linux username (matching `[a-z_][a-z0-9_-]*`) and any valid absolute home directory path, the Dockerfile produced by `NewDockerfileBuilder` SHALL contain the provided username in its user creation instructions (useradd or usermod -l) and SHALL use the provided home directory path for `authorized_keys` placement and sudoers configuration. The Dockerfile SHALL NOT contain the literal string `"dev"` as a username or `"/home/dev"` as a path.
+
+**Validates: Req 22.1, 22.2, 22.4, 22.5**
+
+---
+
+#### Property 53: Agent ContainerMountPath uses runtime-provided home directory
+
+*For any* valid absolute home directory path, every registered agent's `ContainerMountPath(homeDir)` SHALL return a path that starts with the provided `homeDir` prefix. The returned path SHALL NOT contain the literal string `"/home/dev"`.
+
+**Validates: Req 22.4, 22.5**
+
+---
+
+#### Property 54: SSH config entry uses runtime-provided username
+
+*For any* valid container name, port, and Linux username, the SSH config entry produced by `SyncSSHConfig` SHALL contain a `User` field set to the provided username. The entry SHALL NOT contain the literal string `"dev"` as the User value (unless the host user's actual username is `"dev"`).
+
+**Validates: Req 22.4, 22.5**
 
 ---
 
@@ -513,8 +539,10 @@ func TestDockerfileBaseImage(t *testing.T) {
     rapid.Check(t, func(t *rapid.T) {
         uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
         gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+        username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,30}`).Draw(t, "username")
+        homeDir := "/home/" + username
         pubKey := rapid.StringMatching(`ssh-ed25519 [A-Za-z0-9+/]+ test@host`).Draw(t, "pubKey")
-        b := docker.NewDockerfileBuilder(uid, gid, pubKey, "priv-key", "pub-key",
+        b := docker.NewDockerfileBuilder(uid, gid, username, homeDir, pubKey, "priv-key", "pub-key",
             docker.UserStrategyCreate, "")
         lines := b.Lines()
         want := "FROM " + constants.BaseContainerImage
@@ -529,7 +557,10 @@ func TestDockerfileDevUserUID(t *testing.T) {
     rapid.Check(t, func(t *rapid.T) {
         uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
         gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
-        b := docker.NewDockerfileBuilder(uid, gid, "ssh-rsa AAAA test@host", "priv", "pub",
+        username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,30}`).Draw(t, "username")
+        homeDir := "/home/" + username
+        b := docker.NewDockerfileBuilder(uid, gid, username, homeDir,
+            "ssh-rsa AAAA test@host", "priv", "pub",
             docker.UserStrategyCreate, "")
         content := b.Build()
         if !strings.Contains(content, fmt.Sprintf("--uid %d", uid)) {
@@ -538,8 +569,8 @@ func TestDockerfileDevUserUID(t *testing.T) {
         if !strings.Contains(content, fmt.Sprintf("--gid %d", gid)) {
             t.Fatalf("Dockerfile missing --gid %d", gid)
         }
-        if !strings.Contains(content, constants.ContainerUser) {
-            t.Fatalf("Dockerfile missing container user %q", constants.ContainerUser)
+        if !strings.Contains(content, username) {
+            t.Fatalf("Dockerfile missing username %q", username)
         }
     })
 }
@@ -614,12 +645,14 @@ func TestSessionSummaryContainsAllFields(t *testing.T) {
         port := rapid.IntRange(1024, 65535).Draw(t, "port")
         projectDir := rapid.StringMatching(`/[a-z/]+`).Draw(t, "projectDir")
         agentIDs := rapid.SliceOfN(rapid.StringMatching(`[a-z][a-z0-9-]*`), 1, 3).Draw(t, "agentIDs")
+        username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,30}`).Draw(t, "username")
         summary := cmd.FormatSessionSummary(cmd.SessionSummary{
             DataDir:       "/home/user/.config/bootstrap-ai-coding/bac-abc123",
             ProjectDir:    projectDir,
             SSHPort:       port,
-            SSHConnect:    fmt.Sprintf("ssh -p %d %s@localhost", port, constants.ContainerUser),
+            SSHConnect:    fmt.Sprintf("ssh -p %d %s@localhost", port, username),
             EnabledAgents: agentIDs,
+            Username:      username,
         })
         require.Contains(t, summary, "Data directory:")
         require.Contains(t, summary, "Project directory:")
@@ -659,6 +692,62 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
         containerName := rapid.StringMatching(`bac-[a-z][a-z0-9-]*`).Draw(t, "name")
         port := rapid.IntRange(1024, 65535).Draw(t, "port")
         // Call SyncSSHConfig twice with same args; assert file content identical after both calls
+    })
+}
+
+// Feature: bootstrap-ai-coding, Property 52: Dockerfile uses runtime-provided username and home directory
+func TestDockerfileUsesRuntimeUsername(t *testing.T) {
+    rapid.Check(t, func(t *rapid.T) {
+        uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+        gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+        username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,30}`).Draw(t, "username")
+        homeDir := "/home/" + username
+        pubKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test@host"
+        b := docker.NewDockerfileBuilder(uid, gid, username, homeDir, pubKey, "priv", "pub",
+            docker.UserStrategyCreate, "")
+        content := b.Build()
+        // Dockerfile must contain the runtime username
+        require.Contains(t, content, username)
+        // Dockerfile must reference the runtime home directory for authorized_keys
+        require.Contains(t, content, homeDir+"/.ssh/authorized_keys")
+        // Dockerfile must NOT contain hardcoded "dev" as a username (unless username IS "dev")
+        if username != "dev" {
+            // Verify no useradd/usermod with literal "dev"
+            require.NotContains(t, content, "useradd dev")
+            require.NotContains(t, content, "/home/dev")
+        }
+    })
+}
+
+// Feature: bootstrap-ai-coding, Property 53: Agent ContainerMountPath uses runtime-provided home directory
+func TestAgentContainerMountPathUsesRuntimeHomeDir(t *testing.T) {
+    rapid.Check(t, func(t *rapid.T) {
+        homeDir := rapid.StringMatching(`/home/[a-z][a-z0-9_-]{0,30}`).Draw(t, "homeDir")
+        for _, a := range agent.All() {
+            mountPath := a.ContainerMountPath(homeDir)
+            require.True(t, strings.HasPrefix(mountPath, homeDir+"/"),
+                "agent %s mount path %q does not start with homeDir %q", a.ID(), mountPath, homeDir)
+            require.NotContains(t, mountPath, "/home/dev",
+                "agent %s mount path %q contains hardcoded /home/dev", a.ID(), mountPath)
+        }
+    })
+}
+
+// Feature: bootstrap-ai-coding, Property 54: SSH config entry uses runtime-provided username
+func TestSSHConfigEntryUsesRuntimeUsername(t *testing.T) {
+    rapid.Check(t, func(t *rapid.T) {
+        containerName := rapid.StringMatching(`bac-[a-z][a-z0-9-]{1,20}`).Draw(t, "name")
+        port := rapid.IntRange(1024, 65535).Draw(t, "port")
+        username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,30}`).Draw(t, "username")
+        dir := t.TempDir()
+        configPath := filepath.Join(dir, "config")
+        // Write empty config file
+        os.WriteFile(configPath, []byte{}, 0o600)
+        // Call SyncSSHConfig with the runtime username
+        err := ssh.SyncSSHConfigAt(configPath, containerName, port, username, false)
+        require.NoError(t, err)
+        content, _ := os.ReadFile(configPath)
+        require.Contains(t, string(content), "User "+username)
     })
 }
 ```
@@ -748,6 +837,11 @@ func TestSyncSSHConfigIdempotent(t *testing.T) {
 | `TestVerboseFlagWithPurgeRejected` | CLI-3, Req 20.5 |
 | `TestVerboseSilentModeNoStdout` | Req 20.2 |
 | `TestVerboseModeStreamsOutput` | Req 20.3 |
+| `TestHostInfoCurrentReturnsValidInfo` | Req 22.1, 22.3 |
+| `TestHostInfoCurrentNonEmptyUsername` | Req 22.1 |
+| `TestHostInfoCurrentNonEmptyHomeDir` | Req 22.1 |
+| `TestConstantsPackageNoContainerUser` | Req 22.2 |
+| `TestConstantsPackageNoContainerUserHome` | Req 22.2 |
 
 ### Integration Tests
 
@@ -792,5 +886,5 @@ go test -tags integration -timeout 30m ./...
 
 ### Test Coverage Targets
 
-- Unit + property tests: ≥ 80% line coverage on `naming`, `ssh`, `credentials`, `datadir`, `portfinder`, `agent`, `docker/builder.go`, `agents/claude`, `agents/augment`
+- Unit + property tests: ≥ 80% line coverage on `naming`, `ssh`, `datadir`, `agent`, `docker/builder.go`, `agents/claude`, `agents/augment`
 - Integration tests: full happy path + SSH health-check failure path + rebuild path

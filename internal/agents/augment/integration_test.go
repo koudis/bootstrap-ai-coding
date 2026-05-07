@@ -8,9 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +20,7 @@ import (
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
 	"github.com/koudis/bootstrap-ai-coding/internal/testutil"
 )
@@ -79,17 +78,9 @@ func setupSharedContainer() error {
 		return fmt.Errorf("generating user key pair: %w", err)
 	}
 
-	u, err := user.Current()
+	info, err := hostinfo.Current()
 	if err != nil {
-		return fmt.Errorf("getting current user: %w", err)
-	}
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return fmt.Errorf("parsing UID: %w", err)
-	}
-	gid, err := strconv.Atoi(u.Gid)
-	if err != nil {
-		return fmt.Errorf("parsing GID: %w", err)
+		return fmt.Errorf("getting host info: %w", err)
 	}
 
 	sharedClient, err = docker.NewClient()
@@ -99,7 +90,7 @@ func setupSharedContainer() error {
 
 	strategy := docker.UserStrategyCreate
 	conflictingUser := ""
-	conflictingImageUser, err := docker.FindConflictingUser(ctx, sharedClient, uid, gid)
+	conflictingImageUser, err := docker.FindConflictingUser(ctx, sharedClient, info.UID, info.GID)
 	if err != nil {
 		return fmt.Errorf("checking base image for UID/GID conflicts: %w", err)
 	}
@@ -109,7 +100,7 @@ func setupSharedContainer() error {
 	}
 
 	builder := docker.NewDockerfileBuilder(
-		uid, gid,
+		info,
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
 		strategy, conflictingUser,
@@ -147,8 +138,8 @@ func setupSharedContainer() error {
 		Labels: map[string]string{
 			"bac.managed": "true",
 		},
-		HostUID: uid,
-		HostGID: gid,
+		HostUID: info.UID,
+		HostGID: info.GID,
 	}
 
 	_, err = docker.BuildImage(ctx, sharedClient, spec, true)

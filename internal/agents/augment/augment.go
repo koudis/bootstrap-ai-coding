@@ -50,8 +50,8 @@ func (a *augmentAgent) CredentialStorePath() string {
 // ContainerMountPath returns the path inside the container where the
 // Credential_Store is bind-mounted.
 // Satisfies: AC-3
-func (a *augmentAgent) ContainerMountPath() string {
-	return filepath.Join(constants.ContainerUserHome, ".augment")
+func (a *augmentAgent) ContainerMountPath(homeDir string) string {
+	return filepath.Join(homeDir, ".augment")
 }
 
 // HasCredentials reports whether the credential store contains any non-empty

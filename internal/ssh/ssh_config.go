@@ -100,22 +100,22 @@ func writeSSHConfig(path string, stanzas []sshConfigStanza) error {
 }
 
 // buildStanza returns the lines for a new Host stanza for the given container.
-func buildStanza(containerName string, port int) sshConfigStanza {
+func buildStanza(containerName string, port int, user string) sshConfigStanza {
 	return sshConfigStanza{
 		host: containerName,
 		lines: []string{
 			fmt.Sprintf("Host %s", containerName),
 			fmt.Sprintf("    HostName localhost"),
 			fmt.Sprintf("    Port %d", port),
-			fmt.Sprintf("    User %s", constants.ContainerUser),
+			fmt.Sprintf("    User %s", user),
 			fmt.Sprintf("    StrictHostKeyChecking yes"),
 		},
 	}
 }
 
 // stanzaMatches reports whether the stanza's fields match the expected values.
-func stanzaMatches(s sshConfigStanza, containerName string, port int) bool {
-	want := buildStanza(containerName, port)
+func stanzaMatches(s sshConfigStanza, containerName string, port int, user string) bool {
+	want := buildStanza(containerName, port, user)
 	if len(s.lines) != len(want.lines) {
 		return false
 	}
@@ -141,7 +141,7 @@ func stanzaMatches(s sshConfigStanza, containerName string, port int) bool {
 // Never modifies stanzas whose Host value does not equal containerName.
 //
 // Validates: Req 19.1–19.9
-func SyncSSHConfig(containerName string, port int, noUpdate bool) error {
+func SyncSSHConfig(containerName string, port int, user string, noUpdate bool) error {
 	if noUpdate {
 		fmt.Println("SSH config management is disabled (--no-update-ssh-config).")
 		return nil
@@ -166,7 +166,7 @@ func SyncSSHConfig(containerName string, port int, noUpdate bool) error {
 		}
 	}
 
-	want := buildStanza(containerName, port)
+	want := buildStanza(containerName, port, user)
 
 	switch {
 	case idx == -1:
@@ -174,7 +174,7 @@ func SyncSSHConfig(containerName string, port int, noUpdate bool) error {
 		stanzas = append(stanzas, want)
 		return writeSSHConfig(cfgPath, stanzas)
 
-	case stanzaMatches(stanzas[idx], containerName, port):
+	case stanzaMatches(stanzas[idx], containerName, port, user):
 		// Already correct — no-op.
 		return nil
 

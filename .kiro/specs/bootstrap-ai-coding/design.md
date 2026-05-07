@@ -11,7 +11,7 @@
 - **Open/closed core**: adding a new agent requires only a new package in `agents/` — no core files change.
 - **Reproducible containers**: deterministic naming and dynamic Dockerfile generation ensure consistent, idempotent behaviour.
 - **Credential persistence**: per-agent bind-mounts keep authentication tokens alive across sessions.
-- **Non-root safety**: the CLI refuses to run as root; containers run as a `dev` user whose UID/GID match the host user.
+- **Non-root safety**: the CLI refuses to run as root; containers run as a user whose username, UID, and GID match the host user (resolved at runtime via `hostinfo`).
 - **Stable SSH identity**: SSH host keys are generated once per project and reused across rebuilds, preventing `known_hosts` churn.
 - **Persistent port assignment**: the SSH port is chosen once and remembered in the Tool_Data_Dir, so reconnecting is always the same command.
 - **SSH config alias**: an entry is maintained in `~/.ssh/config` for each container so the user can connect with `ssh bac-<dirname>` — no port, user, or hostname to remember.
@@ -29,6 +29,6 @@ The design is split across four files:
 
 ## Related Documents
 
-- `requirements-core.md` — core application requirements (Req 1–21)
+- `requirements-core.md` — core application requirements (Req 1–22, including Req 22: Dynamic Container User Identity)
 - `requirements-agents.md` — agent module requirements (CC-1–CC-6 for Claude Code, AC-1–AC-6 for Augment Code)
 - `requirements-cli-combinations.md` — valid and invalid CLI flag combinations (CLI-1–CLI-6)

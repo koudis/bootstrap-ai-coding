@@ -12,9 +12,11 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/agent"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
 // fixedHostKeyPriv and fixedHostKeyPub are stable test values used wherever
@@ -29,7 +31,7 @@ const (
 // using fixed key material and UserStrategyCreate with uid=1000, gid=1000.
 func newTestBuilder() *docker.DockerfileBuilder {
 	return docker.NewDockerfileBuilder(
-		1000, 1000,
+		&hostinfo.Info{Username: "testuser", HomeDir: "/home/testuser", UID: 1000, GID: 1000},
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
@@ -59,7 +61,7 @@ func TestPropertyAllAgentsSatisfyInterface(t *testing.T) {
 			credPath := a.CredentialStorePath()
 			require.NotEmpty(rt, credPath, "CredentialStorePath must not be empty")
 
-			mountPath := a.ContainerMountPath()
+			mountPath := a.ContainerMountPath("/home/testuser")
 			require.NotEmpty(rt, mountPath, "ContainerMountPath must not be empty")
 
 			// HasCredentials with a temp dir must not panic and must return a
@@ -130,8 +132,8 @@ func TestPropertyClaudeContainerMountPath(t *testing.T) {
 		a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 		require.NoError(rt, err, "claude agent must be registered")
 
-		mountPath := a.ContainerMountPath()
-		wantPath := constants.ContainerUserHome + "/.claude"
+		mountPath := a.ContainerMountPath("/home/testuser")
+		wantPath := "/home/testuser/.claude"
 
 		require.Equal(rt, wantPath, mountPath,
 			"ContainerMountPath() must always return %q", wantPath)
@@ -204,14 +206,14 @@ func TestClaudeCredentialPaths(t *testing.T) {
 }
 
 // TestClaudeContainerMountPath verifies that ContainerMountPath equals
-// constants.ContainerUserHome + "/.claude".
+// "<homeDir>/.claude".
 // Validates: CC-4
 func TestClaudeContainerMountPath(t *testing.T) {
 	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err)
 
-	want := constants.ContainerUserHome + "/.claude"
-	require.Equal(t, want, a.ContainerMountPath())
+	want := "/home/testuser/.claude"
+	require.Equal(t, want, a.ContainerMountPath("/home/testuser"))
 }
 
 // TestClaudeHasCredentialsEmpty verifies that HasCredentials returns (false, nil)
@@ -323,4 +325,35 @@ func TestClaudeInstallNodeAlreadyInstalled(t *testing.T) {
 	linesAfter := len(b.Lines())
 	require.Equal(t, linesBefore+3, linesAfter,
 		"must add exactly 3 RUN steps when Node.js is already installed (prereqs + npm + symlink)")
+}
+
+// ---------------------------------------------------------------------------
+// Property 57: Agent ContainerMountPath uses runtime-provided home directory
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 57: Agent ContainerMountPath uses runtime-provided home directory
+func TestPropertyAgentContainerMountPathUsesRuntimeHomeDir(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		// Draw a random valid absolute home directory path (no trailing slash).
+		homeDir := rapid.StringMatching(`/[a-z][a-z0-9]*(/[a-z][a-z0-9]*)*`).Draw(rt, "homeDir")
+
+		agents := agent.All()
+		require.NotEmpty(rt, agents, "agent.All() must return at least one agent")
+
+		for _, a := range agents {
+			mountPath := a.ContainerMountPath(homeDir)
+
+			// The returned path must start with homeDir + "/"
+			require.True(rt, len(mountPath) > len(homeDir) && mountPath[:len(homeDir)+1] == homeDir+"/",
+				"agent %q: ContainerMountPath(%q) = %q must start with %q",
+				a.ID(), homeDir, mountPath, homeDir+"/")
+
+			// If homeDir is NOT "/home/dev", the returned path must NOT contain "/home/dev"
+			if homeDir != "/home/dev" {
+				require.NotContains(rt, mountPath, "/home/dev",
+					"agent %q: ContainerMountPath(%q) = %q must not contain /home/dev",
+					a.ID(), homeDir, mountPath)
+			}
+		}
+	})
 }

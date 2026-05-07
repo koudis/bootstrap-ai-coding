@@ -20,6 +20,7 @@ import (
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
 	"github.com/koudis/bootstrap-ai-coding/internal/testutil"
 )
@@ -75,12 +76,10 @@ func buildSharedImage(t *testing.T) {
 	_, userPubKey, err := sshpkg.GenerateHostKeyPair()
 	require.NoError(t, err, "generating user key pair")
 
-	u, err := user.Current()
-	require.NoError(t, err, "getting current user")
-	sharedHostUID, err = strconv.Atoi(u.Uid)
-	require.NoError(t, err, "parsing UID")
-	sharedHostGID, err = strconv.Atoi(u.Gid)
-	require.NoError(t, err, "parsing GID")
+	info, err := hostinfo.Current()
+	require.NoError(t, err, "getting host info")
+	sharedHostUID = info.UID
+	sharedHostGID = info.GID
 
 	sharedClient, err = docker.NewClient()
 	require.NoError(t, err, "connecting to Docker daemon")
@@ -95,7 +94,7 @@ func buildSharedImage(t *testing.T) {
 	}
 
 	builder := docker.NewDockerfileBuilder(
-		sharedHostUID, sharedHostGID,
+		info,
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
 		strategy, conflictingUser,
@@ -230,26 +229,26 @@ func TestFileOwnershipMatchesHostUser(t *testing.T) {
 
 	ctx := context.Background()
 
-	u, err := user.Current()
+	info, err := hostinfo.Current()
 	require.NoError(t, err)
 
 	exitCode, err := docker.ExecInContainer(ctx, client, containerName, []string{
-		"su", "-c", "touch /workspace/ownership-test.txt", constants.ContainerUser,
+		"su", "-c", "touch /workspace/ownership-test.txt", info.Username,
 	})
 	require.NoError(t, err)
 	require.Equal(t, 0, exitCode, "expected exit 0 when creating file")
 
-	checkUID := fmt.Sprintf(`[ "$(stat -c '%%u' /workspace/ownership-test.txt)" = "%s" ]`, u.Uid)
+	checkUID := fmt.Sprintf(`[ "$(stat -c '%%u' /workspace/ownership-test.txt)" = "%d" ]`, info.UID)
 	exitCode, err = docker.ExecInContainer(ctx, client, containerName, []string{"bash", "-c", checkUID})
 	require.NoError(t, err, "exec to check file UID")
 	require.Equal(t, 0, exitCode,
-		"expected file UID inside container to match host user UID=%s", u.Uid)
+		"expected file UID inside container to match host user UID=%d", info.UID)
 
-	checkGID := fmt.Sprintf(`[ "$(stat -c '%%g' /workspace/ownership-test.txt)" = "%s" ]`, u.Gid)
+	checkGID := fmt.Sprintf(`[ "$(stat -c '%%g' /workspace/ownership-test.txt)" = "%d" ]`, info.GID)
 	exitCode, err = docker.ExecInContainer(ctx, client, containerName, []string{"bash", "-c", checkGID})
 	require.NoError(t, err, "exec to check file GID")
 	require.Equal(t, 0, exitCode,
-		"expected file GID inside container to match host user GID=%s", u.Gid)
+		"expected file GID inside container to match host user GID=%d", info.GID)
 }
 
 // ----------------------------------------------------------------------------
@@ -346,6 +345,13 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 	gid, err := strconv.Atoi(u.Gid)
 	require.NoError(t, err)
 
+	info := &hostinfo.Info{
+		Username: u.Username,
+		HomeDir:  u.HomeDir,
+		UID:      uid,
+		GID:      gid,
+	}
+
 	projectDir := t.TempDir()
 	dirName := filepath.Base(projectDir)
 	containerName := constants.ContainerNamePrefix + sanitize(dirName)
@@ -362,7 +368,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 
 		strategy := docker.UserStrategyCreate
 		conflictingUser := ""
-		conflictingImageUser, err := docker.FindConflictingUser(ctx, client, uid, gid)
+		conflictingImageUser, err := docker.FindConflictingUser(ctx, client, info.UID, info.GID)
 		require.NoError(t, err, "checking base image for UID/GID conflicts")
 		if conflictingImageUser != nil {
 			strategy = docker.UserStrategyRename
@@ -370,7 +376,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 		}
 
 		builder := docker.NewDockerfileBuilder(
-			uid, gid,
+			info,
 			userPubKey,
 			hostKeyPriv, hostKeyPub,
 			strategy, conflictingUser,
@@ -385,8 +391,8 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			},
 			SSHPort: port,
 			Labels:  map[string]string{"bac.managed": "true"},
-			HostUID: uid,
-			HostGID: gid,
+			HostUID: info.UID,
+			HostGID: info.GID,
 		}
 
 		_, err = docker.BuildImage(ctx, client, spec, false)
@@ -513,7 +519,10 @@ func TestSSHConfigEntryLifecycle(t *testing.T) {
 
 	containerName, sshPort, _, cleanup := startContainerFromSharedImage(t)
 
-	err := sshpkg.SyncSSHConfig(containerName, sshPort, false)
+	info, err := hostinfo.Current()
+	require.NoError(t, err)
+
+	err = sshpkg.SyncSSHConfig(containerName, sshPort, info.Username, false)
 	require.NoError(t, err, "SyncSSHConfig should succeed")
 
 	cfgPath := filepath.Join(tempHome, ".ssh", "config")
@@ -523,7 +532,7 @@ func TestSSHConfigEntryLifecycle(t *testing.T) {
 
 	hostLine := fmt.Sprintf("Host %s", containerName)
 	portLine := fmt.Sprintf("Port %d", sshPort)
-	userLine := fmt.Sprintf("User %s", constants.ContainerUser)
+	userLine := fmt.Sprintf("User %s", info.Username)
 	hostnameLine := "HostName localhost"
 
 	require.True(t, strings.Contains(content, hostLine),
@@ -531,7 +540,7 @@ func TestSSHConfigEntryLifecycle(t *testing.T) {
 	require.True(t, strings.Contains(content, portLine),
 		"ssh config should contain 'Port %d'", sshPort)
 	require.True(t, strings.Contains(content, userLine),
-		"ssh config should contain 'User %s'", constants.ContainerUser)
+		"ssh config should contain 'User %s'", info.Username)
 	require.True(t, strings.Contains(content, hostnameLine),
 		"ssh config should contain 'HostName localhost'")
 
@@ -657,14 +666,10 @@ func TestAFindConflictingUserPullsImageIfAbsent(t *testing.T) {
 	client, err := docker.NewClient()
 	require.NoError(t, err, "connecting to Docker daemon")
 
-	u, err := user.Current()
-	require.NoError(t, err)
-	uid, err := strconv.Atoi(u.Uid)
-	require.NoError(t, err)
-	gid, err := strconv.Atoi(u.Gid)
+	info, err := hostinfo.Current()
 	require.NoError(t, err)
 
-	result, err := docker.FindConflictingUser(ctx, client, uid, gid)
+	result, err := docker.FindConflictingUser(ctx, client, info.UID, info.GID)
 	require.NoError(t, err,
 		"FindConflictingUser must succeed even when the base image is not cached locally")
 	_ = result

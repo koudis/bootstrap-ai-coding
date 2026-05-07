@@ -1,4 +1,4 @@
-package credentials_test
+package datadir_test
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
-	"github.com/koudis/bootstrap-ai-coding/internal/credentials"
+	"github.com/koudis/bootstrap-ai-coding/internal/datadir"
 )
 
 // Feature: bootstrap-ai-coding, Property 14: Credential store path resolution respects override precedence
@@ -19,7 +19,7 @@ func TestPropertyCredentialResolveOverridePrecedence(t *testing.T) {
 		agentDefault := rapid.String().Draw(rt, "agentDefault")
 		override := rapid.OneOf(rapid.Just(""), rapid.String()).Draw(rt, "override")
 
-		result := credentials.Resolve(agentDefault, override)
+		result := datadir.ResolveCredentialPath(agentDefault, override)
 
 		if override != "" {
 			require.Equal(rt, override, result,
@@ -46,21 +46,21 @@ func TestPropertyCredentialEnsureDirCreatesWithCorrectPerm(t *testing.T) {
 		subdir := rapid.StringMatching(`[a-z][a-z0-9-]*`).Draw(rt, "subdir")
 		path := filepath.Join(base, subdir)
 
-		err := credentials.EnsureDir(path)
+		err := datadir.EnsureCredentialDir(path)
 		require.NoError(rt, err,
-			"EnsureDir must not return an error for path %q", path)
+			"EnsureCredentialDir must not return an error for path %q", path)
 
 		info, statErr := os.Stat(path)
 		require.NoError(rt, statErr,
-			"directory must exist after EnsureDir (path=%q)", path)
+			"directory must exist after EnsureCredentialDir (path=%q)", path)
 		require.True(rt, info.IsDir(),
-			"path must be a directory after EnsureDir (path=%q)", path)
+			"path must be a directory after EnsureCredentialDir (path=%q)", path)
 		require.Equal(rt, os.FileMode(constants.ToolDataDirPerm), info.Mode().Perm(),
 			"directory must have mode %04o (path=%q)", constants.ToolDataDirPerm, path)
 	})
 }
 
-// expandHome mirrors the unexported expandHome logic in credentials/store.go
+// expandHome mirrors the unexported expandHome logic in datadir/credentials.go
 // so Property 14 can compute the expected value independently.
 func expandHome(p string) string {
 	if len(p) >= 2 && p[:2] == "~/" {
@@ -70,27 +70,27 @@ func expandHome(p string) string {
 	return p
 }
 
-// TestResolveExpandsHomeTilde verifies that Resolve expands a "~/" prefix in
+// TestResolveExpandsHomeTilde verifies that ResolveCredentialPath expands a "~/" prefix in
 // the agentDefault path when no override is provided.
 func TestResolveExpandsHomeTilde(t *testing.T) {
-	result := credentials.Resolve("~/.myagent", "")
+	result := datadir.ResolveCredentialPath("~/.myagent", "")
 	require.NotContains(t, result, "~/",
-		"Resolve must expand ~/ in agentDefault, got %q", result)
+		"ResolveCredentialPath must expand ~/ in agentDefault, got %q", result)
 	require.Contains(t, result, ".myagent")
 }
 
 // TestResolveNoTildePassthrough verifies that a path without "~/" is returned as-is.
 func TestResolveNoTildePassthrough(t *testing.T) {
-	result := credentials.Resolve("/absolute/path/.myagent", "")
+	result := datadir.ResolveCredentialPath("/absolute/path/.myagent", "")
 	require.Equal(t, "/absolute/path/.myagent", result)
 }
 
-// TestEnsureDirIdempotent verifies that calling EnsureDir twice on the same
+// TestEnsureDirIdempotent verifies that calling EnsureCredentialDir twice on the same
 // path does not return an error.
 func TestEnsureDirIdempotent(t *testing.T) {
 	base := t.TempDir()
 	path := filepath.Join(base, "subdir")
 
-	require.NoError(t, credentials.EnsureDir(path))
-	require.NoError(t, credentials.EnsureDir(path), "second call must not error")
+	require.NoError(t, datadir.EnsureCredentialDir(path))
+	require.NoError(t, datadir.EnsureCredentialDir(path), "second call must not error")
 }

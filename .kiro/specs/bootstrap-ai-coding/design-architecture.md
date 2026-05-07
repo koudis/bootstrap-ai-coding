@@ -11,9 +11,7 @@ graph TD
     Naming["internal/naming\n(core)"]
     Docker["internal/docker\n(core)"]
     SSH["internal/ssh\n(core)"]
-    Credentials["internal/credentials\n(core)"]
-    DataDir["internal/datadir\n(core)"]
-    PortFinder["internal/portfinder\n(core)"]
+    DataDir["internal/datadir\n(core)\n(includes credentials + port finding)"]
     AgentPkg["internal/agent — interface & registry\n(core)"]
     ClaudeAgent["internal/agents/claude\n(agent module)"]
     FutureAgent["internal/agents/other\n(future agent module)"]
@@ -24,9 +22,7 @@ graph TD
     CLI --> Naming
     CLI --> Docker
     CLI --> SSH
-    CLI --> Credentials
     CLI --> DataDir
-    CLI --> PortFinder
     CLI --> AgentPkg
     ClaudeAgent -->|"Register() via init()"| AgentPkg
     FutureAgent -->|"Register() via init()"| AgentPkg
@@ -34,7 +30,9 @@ graph TD
     DockerDaemon --> Container
 ```
 
-The core packages (`internal/cmd`, `internal/naming`, `internal/docker`, `internal/ssh`, `internal/credentials`, `internal/datadir`, `internal/portfinder`, `internal/agent`) have **no import dependency** on any package under `internal/agents/`. Agent modules are wired in exclusively via `main.go` blank imports.
+The core packages (`internal/cmd`, `internal/naming`, `internal/docker`, `internal/ssh`, `internal/datadir`, `internal/agent`) have **no import dependency** on any package under `internal/agents/`. Agent modules are wired in exclusively via `main.go` blank imports.
+
+> **Note (Req 28 — Module Consolidation):** The former `internal/credentials` and `internal/portfinder` packages have been merged into `internal/datadir`. Both dealt with per-project persistent state (credential paths, port selection/persistence) and had only `cmd/root.go` as their consumer. Consolidating them reduces package count without introducing import cycles or mixing unrelated concerns.
 
 ### Package Layout
 
@@ -46,6 +44,8 @@ bootstrap-ai-coding/
     │   ── CORE ─────────────────────────────────────────────────────────────
     ├── constants/
     │   └── constants.go         # All glossary-derived constants — single source of truth
+    ├── hostinfo/
+    │   └── hostinfo.go          # Info struct + Current() — runtime host user identity (Req 22)
     ├── cmd/
     │   └── root.go              # Cobra root command, flag definitions, orchestration
     ├── naming/
@@ -58,20 +58,21 @@ bootstrap-ai-coding/
     │   ├── keys.go              # Public key discovery
     │   ├── known_hosts.go       # ~/.ssh/known_hosts sync (SyncKnownHosts, RemoveKnownHostsEntries)
     │   └── ssh_config.go        # ~/.ssh/config sync (SyncSSHConfig, RemoveSSHConfigEntry, RemoveAllBACSSHConfigEntries)
-    ├── credentials/
-    │   └── store.go             # Credential store path resolution, dir creation, token check
     ├── datadir/
-    │   └── datadir.go           # Tool_Data_Dir management: create, read/write port, keys, manifest, purge
-    ├── portfinder/
-    │   └── portfinder.go        # SSH port auto-selection: start at constants.SSHPortStart, increment until free
+    │   ├── datadir.go           # Tool_Data_Dir management: create, read/write port, keys, manifest, purge
+    │   ├── credentials.go       # Credential store path resolution and dir creation (merged from credentials/)
+    │   └── portfinder.go        # SSH port auto-selection starting at constants.SSHPortStart (merged from portfinder/)
     ├── agent/
     │   ├── agent.go             # Agent interface definition  ← stable API boundary
+    │   ├── preparer.go          # CredentialPreparer optional interface
     │   └── registry.go          # AgentRegistry — Register/Lookup/All
     │
     │   ── AGENT MODULES ────────────────────────────────────────────────────
     └── agents/
-        └── claude/
-            └── claude.go        # Claude Code — reference Agent implementation
+        ├── claude/
+        │   └── claude.go        # Claude Code — reference Agent implementation
+        └── augment/
+            └── augment.go       # Augment Code agent module
         # future agents added here, no core files change
 ```
 
@@ -82,20 +83,21 @@ sequenceDiagram
     participant User
     participant CLI
     participant DataDir
-    participant PortFinder
     participant AgentRegistry
     participant Docker
     participant Container
 
     User->>CLI: bac /path/to/project [--agents claude-code]
     CLI->>CLI: Check effective UID — if 0, print error and exit 1 (Req 11)
+    CLI->>CLI: Resolve host user identity via hostinfo.Current() (Req 22)
+    note over CLI: *hostinfo.Info (Username, HomeDir, UID, GID) now available for all subsequent operations
     CLI->>CLI: Validate project path exists
     CLI->>Docker: Ping daemon, check version >= 20.10
     CLI->>AgentRegistry: Resolve enabled agents from --agents flag (default: "claude-code,augment-code")
     note over AgentRegistry: Unknown agent ID → error, exit 1
     CLI->>SSH: Discover public key (~/.ssh/id_ed25519.pub → id_rsa.pub → --ssh-key)
     CLI->>DataDir: Init Tool_Data_Dir (~/.config/bootstrap-ai-coding/<name>/)
-    CLI->>PortFinder: Load persisted port or find free port starting at constants.SSHPortStart
+    CLI->>DataDir: Load persisted port or find free port starting at constants.SSHPortStart
     CLI->>DataDir: Persist chosen SSH port
     CLI->>DataDir: Load or generate SSH host key pair (stored in Tool_Data_Dir)
     loop For each enabled agent
@@ -199,13 +201,15 @@ sequenceDiagram
 
 `constants/constants.go` holds every value that originates from the requirements glossary. No other package may hardcode these values — they must always import and reference this package.
 
+> **Note (Req 22):** `ContainerUser` and `ContainerUserHome` are **no longer compile-time constants**. They have been removed from this package. The container user's username and home directory are resolved at runtime from the host user's OS account via the `hostinfo` package (see below). All packages that previously referenced `constants.ContainerUser` or `constants.ContainerUserHome` now receive these values at runtime through the `*hostinfo.Info` struct.
+
 ```go
 package constants
 
 const (
     BaseContainerImage          = "ubuntu:26.04"
-    ContainerUser               = "dev"
-    ContainerUserHome           = "/home/" + ContainerUser
+    // ContainerUser — REMOVED (Req 22): now a runtime value from Info.Username
+    // ContainerUserHome — REMOVED (Req 22): now a runtime value from Info.HomeDir
     WorkspaceMountPath          = "/workspace"
     SSHPortStart                = 2222
     ToolDataDirRoot             = "~/.config/bootstrap-ai-coding"
@@ -228,13 +232,67 @@ const (
 )
 ```
 
-**Validates: All glossary-derived values across Req 1–19, CC-1–CC-6**
+**Validates: All glossary-derived values across Req 1–21, CC-1–CC-6**
+
+---
+
+### HostInfo Package — Runtime Container User Identity (Req 22)
+
+New package `internal/hostinfo` resolves the host user's identity at runtime. This replaces the former compile-time constants `ContainerUser` and `ContainerUserHome`. The struct is named `Info` and is passed as a single value to all components that need it (DockerfileBuilder, agent modules, SSH config, etc.).
+
+```go
+// Package hostinfo resolves the host user's identity at CLI startup.
+package hostinfo
+
+import (
+    "fmt"
+    "os/user"
+    "strconv"
+)
+
+// Info holds the runtime-resolved host user identity.
+// These values determine the Container_User username and home directory.
+type Info struct {
+    Username string // host username (e.g. "alice")
+    HomeDir  string // host home directory (e.g. "/home/alice")
+    UID      int    // host effective UID
+    GID      int    // host effective GID
+}
+
+// Current returns the host user's identity. Called once at CLI startup.
+// Returns an error if the OS user cannot be determined.
+func Current() (*Info, error) {
+    u, err := user.Current()
+    if err != nil {
+        return nil, fmt.Errorf("resolving host user: %w", err)
+    }
+    uid, _ := strconv.Atoi(u.Uid)
+    gid, _ := strconv.Atoi(u.Gid)
+    return &Info{
+        Username: u.Username,
+        HomeDir:  u.HomeDir,
+        UID:      uid,
+        GID:      gid,
+    }, nil
+}
+```
+
+**Design decisions:**
+
+- **Single resolution point:** `hostinfo.Current()` is called once in `cmd/root.go` at the very start of the `RunE` function, before flag validation (but after the root-check). The resulting `*hostinfo.Info` is threaded through to all dependent operations.
+- **No global state:** The `Info` struct is passed explicitly — no package-level `var` that could be read before initialization.
+- **Linux-only:** No macOS path translation. The `HomeDir` from `os/user.Current()` is used as-is (always `/home/<username>`).
+- **UID/GID included:** The struct also carries UID and GID, consolidating the existing `os.Getuid()`/`os.Getgid()` calls that were scattered across `cmd/root.go`.
+
+**Validates: Req 22.1, 22.2, 22.3, 22.5, 22.6**
 
 ---
 
 ### Agent Interface — The Core API Boundary
 
 The `Agent` interface is the **stable contract** between the core and all agent modules. It lives in `agent/agent.go`. The core never imports any `agents/*` package directly.
+
+**Req 22 change:** `ContainerMountPath()` now accepts the container user's home directory as a parameter, since it is no longer available as a compile-time constant. This allows agent modules to construct their mount paths using the runtime-resolved home directory from `hostinfo.Info.HomeDir`.
 
 ```go
 package agent
@@ -248,13 +306,13 @@ type Agent interface {
     ID() string
     Install(b *docker.DockerfileBuilder)
     CredentialStorePath() string
-    ContainerMountPath() string
+    ContainerMountPath(homeDir string) string  // Req 22: homeDir from info.HomeDir
     HasCredentials(storePath string) (bool, error)
-    HealthCheck(ctx context.Context, containerID string) error
+    HealthCheck(ctx context.Context, c *docker.Client, containerID string) error
 }
 ```
 
-**Validates: Req 7.1**
+**Validates: Req 7.1, Req 22.4**
 
 ### AgentRegistry
 
@@ -288,6 +346,8 @@ The builder supports two **user strategies** (Req 10, 10a):
 - `UserStrategyCreate` — no UID/GID conflict; creates the Container_User with `useradd`
 - `UserStrategyRename` — a Conflicting_Image_User exists; renames it with `usermod -l` instead
 
+**Req 22 change:** The constructor now accepts a `*hostinfo.Info` struct (runtime-resolved from the host user's OS account) instead of separate `uid, gid int` parameters or compile-time constants. All Dockerfile instructions that reference the container user or home directory use the fields from this struct. Callers pass the single `*hostinfo.Info` value rather than individual arguments.
+
 ```go
 type UserStrategy int
 
@@ -296,7 +356,10 @@ const (
     UserStrategyRename
 )
 
-func NewDockerfileBuilder(uid, gid int, publicKey, hostKeyPriv, hostKeyPub string,
+// NewDockerfileBuilder creates a builder for the container Dockerfile.
+// info carries the runtime-resolved Container_User identity (Req 22).
+func NewDockerfileBuilder(info *hostinfo.Info,
+    publicKey, hostKeyPriv, hostKeyPub string,
     strategy UserStrategy, conflictingUser string) *DockerfileBuilder
 
 func (b *DockerfileBuilder) From(image string)
@@ -307,16 +370,26 @@ func (b *DockerfileBuilder) Cmd(cmd string)
 func (b *DockerfileBuilder) Finalize()        // appends CMD — must be called last, after all agent Install() steps
 func (b *DockerfileBuilder) Build() string
 func (b *DockerfileBuilder) Lines() []string
+// Username returns the container username from the *hostinfo.Info this builder was configured with (Req 22).
+func (b *DockerfileBuilder) Username() string
+// HomeDir returns the container user home directory from the *hostinfo.Info this builder was configured with (Req 22).
+func (b *DockerfileBuilder) HomeDir() string
 ```
+
+**Generated Dockerfile user creation example** (values from `*hostinfo.Info`):
+```
+RUN useradd --create-home --home-dir /home/alice --uid 1000 --gid 1000 --shell /bin/bash alice
+```
+(Where `alice`, `/home/alice`, `1000`, `1000` are example values from `info.Username`, `info.HomeDir`, `info.UID`, `info.GID`.)
 
 **Dockerfile instruction order (Req 21):** `NewDockerfileBuilder` seeds the base layers (FROM, openssh-server, Container_User, sudo, SSH keys, sshd_config, /run/sshd) but does **not** append `CMD`. The caller appends agent steps via `Install()`, then the manifest `RUN`, then calls `Finalize()` to append `CMD` as the final instruction. This ensures all `RUN` layers are ordered before `CMD`, keeping them in Docker's layer cache across rebuilds.
 
 ```
 FROM ubuntu:26.04
 RUN apt-get install openssh-server sudo     ← base, stable, cached
-RUN groupadd/useradd (or usermod rename)    ← stable per project, cached
-RUN sudoers                                 ← stable, cached
-RUN SSH authorized_keys                     ← stable per user key, cached
+RUN groupadd/useradd <username> (or usermod rename)  ← stable per project, cached (Req 22: from info.Username)
+RUN sudoers for <username>                  ← stable, cached
+RUN SSH authorized_keys in <homeDir>/.ssh/  ← stable per user key, cached (Req 22: from info.HomeDir)
 RUN SSH host key injection                  ← stable per project, cached
 RUN sshd_config hardening                   ← stable, cached
 RUN mkdir /run/sshd                         ← stable, cached
@@ -479,16 +552,17 @@ type SSHConfigEntry struct {
     Host     string // e.g. "bac-my-project" or "bac-path_my-project"
     HostName string // always "localhost"
     Port     int    // SSH_Port
-    User     string // constants.ContainerUser ("dev")
+    User     string // from info.Username (Req 22, via *hostinfo.Info)
     // StrictHostKeyChecking: always "yes" — host key kept consistent by Req 18
     // IdentityFile: intentionally omitted — public key in authorized_keys (Req 4)
 }
 
 // SyncSSHConfig ensures a correct entry exists for containerName and port.
+// The user field comes from info.Username (Req 22, via *hostinfo.Info).
 // If noUpdate is true, prints a notice and returns without touching the file.
 // Appends if absent; no-op if matching; replaces and prints confirmation if stale.
 // Never modifies entries whose Host does not match containerName.
-func SyncSSHConfig(containerName string, port int, noUpdate bool) error
+func SyncSSHConfig(containerName string, port int, user string, noUpdate bool) error
 
 // RemoveSSHConfigEntry removes the Host stanza for containerName. No-op if absent.
 func RemoveSSHConfigEntry(containerName string) error
@@ -504,27 +578,28 @@ func RemoveAllBACSSHConfigEntries() error
 
 ---
 
-### Credentials Package
+### Credentials (merged into DataDir — Req 28)
 
-`credentials/store.go` handles per-agent credential store path resolution and directory creation. It is agent-agnostic — it operates on paths provided by the agent via the `Agent` interface.
+> **Removed as a standalone package.** The two functions (`Resolve` and `EnsureDir`) now live in `datadir/credentials.go`. The API is unchanged — only the import path changes from `credentials.Resolve` / `credentials.EnsureDir` to `datadir.ResolveCredentialPath` / `datadir.EnsureCredentialDir`.
 
 ```go
-// Resolve returns override if non-empty, else expands ~ in agentDefault.
-func Resolve(agentDefault, override string) string
+// ResolveCredentialPath returns override if non-empty, else expands ~ in agentDefault.
+func ResolveCredentialPath(agentDefault, override string) string
 
-// EnsureDir creates the directory at path if it does not already exist.
-func EnsureDir(path string) error
+// EnsureCredentialDir creates the directory at path if it does not already exist.
+func EnsureCredentialDir(path string) error
 ```
 
-**Validates: Req 8.3, 8.4**
+**Validates: Req 8.3, 8.4, Req 28**
 
 ---
 
 ### DataDir Package
 
-`datadir/datadir.go` manages the Tool_Data_Dir (`~/.config/bootstrap-ai-coding/<container-name>/`). Single source of truth for all persistent per-project data: SSH port, SSH host key pair, and agent manifest.
+`datadir/datadir.go` manages the Tool_Data_Dir (`~/.config/bootstrap-ai-coding/<container-name>/`). Single source of truth for all persistent per-project data: SSH port, SSH host key pair, agent manifest, credential paths, and port auto-selection.
 
 ```go
+// --- datadir.go (core data directory management) ---
 func New(containerName string) (*DataDir, error)
 func (d *DataDir) Path() string
 func (d *DataDir) ReadPort() (int, error)
@@ -534,22 +609,31 @@ func (d *DataDir) WriteHostKey(priv, pub string) error
 func (d *DataDir) ReadManifest() ([]string, error)
 func (d *DataDir) WriteManifest(agentIDs []string) error
 func PurgeRoot() error
-```
+func ListContainerNames() ([]string, error)
 
-**Validates: Req 12.2, 13.1, 13.4, 15.1–15.3**
+// --- credentials.go (merged from internal/credentials) ---
+// ResolveCredentialPath returns override if non-empty, else expands ~ in agentDefault.
+func ResolveCredentialPath(agentDefault, override string) string
+// EnsureCredentialDir creates the directory at path if it does not already exist.
+func EnsureCredentialDir(path string) error
 
----
-
-### PortFinder Package
-
-`portfinder/portfinder.go` implements SSH port auto-selection starting at `constants.SSHPortStart`, incrementing until a free port is found.
-
-```go
+// --- portfinder.go (merged from internal/portfinder) ---
+// FindFreePort iterates from constants.SSHPortStart upward and returns the
+// first TCP port on 127.0.0.1 that is not already in use.
 func FindFreePort() (int, error)
+// IsPortFree reports whether the given port is available for binding on 127.0.0.1.
 func IsPortFree(port int) bool
 ```
 
-**Validates: Req 12.1**
+**Validates: Req 8.3, 8.4, 12.1, 12.2, 13.1, 13.4, 15.1–15.3, Req 28**
+
+---
+
+### PortFinder (merged into DataDir — Req 28)
+
+> **Removed as a standalone package.** `FindFreePort` and `IsPortFree` now live in `datadir/portfinder.go`. The API is unchanged — only the import path changes from `portfinder.FindFreePort` to `datadir.FindFreePort`.
+
+**Validates: Req 12.1, Req 28**
 
 ---
 
@@ -583,6 +667,7 @@ type Config struct {
     NoUpdateKnownHosts bool
     NoUpdateSSHConfig  bool
     CredStoreOverrides map[string]string
+    HostInfo           *hostinfo.Info  // Req 22: runtime-resolved host user identity
 }
 ```
 
@@ -596,8 +681,7 @@ type ContainerSpec struct {
     Mounts      []Mount
     SSHPort     int
     Labels      map[string]string
-    HostUID     int
-    HostGID     int
+    HostInfo    *hostinfo.Info  // Req 22: runtime-resolved host user identity (UID, GID, Username, HomeDir)
 }
 
 type Mount struct {
@@ -616,6 +700,7 @@ type SessionSummary struct {
     SSHPort       int
     SSHConnect    string   // e.g. "ssh bac-my-project" (relies on SSH_Config_Entry from Req 19)
     EnabledAgents []string
+    Username      string   // Req 22: from info.Username (for SSH connect display)
 }
 ```
 
@@ -730,7 +815,7 @@ func ExpandHome(p string) string {
 }
 ```
 
-All packages that currently define their own `expandHome` (`naming`, `ssh`, `credentials`, `datadir`, `cmd`) remove the local copy and import `pathutil.ExpandHome`. Tests in `cmd_test` that reference `cmd.ExpandHome` switch to `pathutil.ExpandHome`.
+All packages that currently define their own `expandHome` (`naming`, `ssh`, `datadir`, `cmd`) remove the local copy and import `pathutil.ExpandHome`. Tests in `cmd_test` that reference `cmd.ExpandHome` switch to `pathutil.ExpandHome`.
 
 **Validates: Req 22**
 

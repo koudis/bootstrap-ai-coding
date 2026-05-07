@@ -13,6 +13,8 @@ This document currently covers **Claude Code** as the reference implementation a
 ## Glossary
 
 > Terms defined in `requirements-core.md` (Agent_Interface, Base_Container_Image, Container_User, Container_User_Home, Credential_Store, Credential_Volume) are not repeated here. See the core glossary for their definitions.
+>
+> **Note:** `Container_User` and `Container_User_Home` match the Host_User's username and home directory path (see core Requirement 22). Agent modules that reference these values (e.g. for credential mount paths) receive them via the Agent_Interface contract.
 
 - **Agent_ID**: The unique, stable string identifier for an agent module (e.g. `"claude-code"`). This is the value users supply to the `--agents` flag.
 - **Health_Check**: A verification step run after container start to confirm the agent is installed and ready to use.

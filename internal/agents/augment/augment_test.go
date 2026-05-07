@@ -16,6 +16,7 @@ import (
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
 // fixedHostKeyPriv and fixedHostKeyPub are stable test values used wherever
@@ -30,7 +31,7 @@ const (
 // using fixed key material and UserStrategyCreate with uid=1000, gid=1000.
 func newTestBuilder() *docker.DockerfileBuilder {
 	return docker.NewDockerfileBuilder(
-		1000, 1000,
+		&hostinfo.Info{Username: "testuser", HomeDir: "/home/testuser", UID: 1000, GID: 1000},
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
@@ -112,8 +113,8 @@ func TestPropertyAugmentContainerMountPath(t *testing.T) {
 		a, err := agent.Lookup(constants.AugmentCodeAgentName)
 		require.NoError(rt, err, "augment agent must be registered")
 
-		mountPath := a.ContainerMountPath()
-		wantPath := filepath.Join(constants.ContainerUserHome, ".augment")
+		mountPath := a.ContainerMountPath("/home/testuser")
+		wantPath := "/home/testuser/.augment"
 
 		require.Equal(rt, wantPath, mountPath,
 			"ContainerMountPath() must always return %q", wantPath)
@@ -162,7 +163,7 @@ func TestPropertyAugmentAgentSatisfiesInterface(t *testing.T) {
 		credPath := a.CredentialStorePath()
 		require.NotEmpty(rt, credPath, "CredentialStorePath must not be empty")
 
-		mountPath := a.ContainerMountPath()
+		mountPath := a.ContainerMountPath("/home/testuser")
 		require.NotEmpty(rt, mountPath, "ContainerMountPath must not be empty")
 
 		tmpDir := t.TempDir()
@@ -217,14 +218,14 @@ func TestAugmentCredentialPaths(t *testing.T) {
 }
 
 // TestAugmentContainerMountPath verifies that ContainerMountPath equals
-// filepath.Join(constants.ContainerUserHome, ".augment").
+// "<homeDir>/.augment".
 // Validates: AC-4
 func TestAugmentContainerMountPath(t *testing.T) {
 	a, err := agent.Lookup(constants.AugmentCodeAgentName)
 	require.NoError(t, err)
 
-	want := filepath.Join(constants.ContainerUserHome, ".augment")
-	require.Equal(t, want, a.ContainerMountPath())
+	want := "/home/testuser/.augment"
+	require.Equal(t, want, a.ContainerMountPath("/home/testuser"))
 }
 
 // TestAugmentHasCredentialsEmpty verifies that HasCredentials returns (false, nil)

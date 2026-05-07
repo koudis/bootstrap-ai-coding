@@ -13,6 +13,7 @@ import (
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
 // fixedHostKeyPriv and fixedHostKeyPub are stable test values used wherever
@@ -23,11 +24,21 @@ const (
 	fixedPublicKey   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfakePubKey test@host"
 )
 
+// testInfo returns a *hostinfo.Info suitable for unit tests.
+func testInfo(uid, gid int) *hostinfo.Info {
+	return &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      uid,
+		GID:      gid,
+	}
+}
+
 // newCreateBuilder is a convenience helper that builds a DockerfileBuilder
 // using UserStrategyCreate with the given uid/gid and fixed key material.
 func newCreateBuilder(uid, gid int) *docker.DockerfileBuilder {
 	return docker.NewDockerfileBuilder(
-		uid, gid,
+		testInfo(uid, gid),
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
@@ -38,7 +49,7 @@ func newCreateBuilder(uid, gid int) *docker.DockerfileBuilder {
 // using UserStrategyRename with the given uid/gid and conflicting user name.
 func newRenameBuilder(uid, gid int, conflictingUser string) *docker.DockerfileBuilder {
 	return docker.NewDockerfileBuilder(
-		uid, gid,
+		testInfo(uid, gid),
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyRename, conflictingUser,
@@ -115,8 +126,8 @@ func TestPropertyDockerfileSSHServerAndContainerUser(t *testing.T) {
 			"Dockerfile must install openssh-server")
 
 		// Must reference ContainerUser
-		require.Contains(t, content, constants.ContainerUser,
-			"Dockerfile must reference ContainerUser %q", constants.ContainerUser)
+		require.Contains(t, content, "testuser",
+			"Dockerfile must reference ContainerUser %q", "testuser")
 
 		// Must start sshd as the CMD
 		require.Contains(t, content, "/usr/sbin/sshd",
@@ -162,10 +173,10 @@ func TestPropertyContainerUserUID_Rename(t *testing.T) {
 		// command must reference the conflicting user and the ContainerUser.
 		require.Contains(t, content, conflictingUser,
 			"Dockerfile must reference conflicting user %q", conflictingUser)
-		require.Contains(t, content, constants.ContainerUser,
-			"Dockerfile must reference ContainerUser %q", constants.ContainerUser)
-		require.Contains(t, content, constants.ContainerUserHome,
-			"Dockerfile must reference ContainerUserHome %q", constants.ContainerUserHome)
+		require.Contains(t, content, "testuser",
+			"Dockerfile must reference ContainerUser %q", "testuser")
+		require.Contains(t, content, "/home/testuser",
+			"Dockerfile must reference ContainerUserHome %q", "/home/testuser")
 	})
 }
 
@@ -304,7 +315,7 @@ func TestPropertyPasswordlessSudo_Create(t *testing.T) {
 		content := b.Build()
 
 		// Must contain a sudoers entry for ContainerUser with NOPASSWD
-		require.Contains(t, content, constants.ContainerUser,
+		require.Contains(t, content, "testuser",
 			"Dockerfile must reference ContainerUser in sudoers")
 		require.Contains(t, content, "NOPASSWD:ALL",
 			"Dockerfile must grant NOPASSWD:ALL sudo to ContainerUser")
@@ -377,14 +388,14 @@ func TestPropertyPublicKeyInjected_Create(t *testing.T) {
 		publicKey := "ssh-ed25519 " + keyBody + " test@host"
 
 		b := docker.NewDockerfileBuilder(
-			uid, gid,
+			testInfo(uid, gid),
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyCreate, "",
 		)
 		content := b.Build()
 
-		authorizedKeysPath := constants.ContainerUserHome + "/.ssh/authorized_keys"
+		authorizedKeysPath := "/home/testuser/.ssh/authorized_keys"
 		require.Contains(t, content, authorizedKeysPath,
 			"Dockerfile must reference authorized_keys path %q", authorizedKeysPath)
 	})
@@ -400,14 +411,14 @@ func TestPropertyPublicKeyInjected_Rename(t *testing.T) {
 		publicKey := "ssh-ed25519 " + keyBody + " test@host"
 
 		b := docker.NewDockerfileBuilder(
-			uid, gid,
+			testInfo(uid, gid),
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyRename, conflictingUser,
 		)
 		content := b.Build()
 
-		authorizedKeysPath := constants.ContainerUserHome + "/.ssh/authorized_keys"
+		authorizedKeysPath := "/home/testuser/.ssh/authorized_keys"
 		require.Contains(t, content, authorizedKeysPath,
 			"Dockerfile must reference authorized_keys path %q", authorizedKeysPath)
 	})
@@ -428,7 +439,7 @@ func TestPropertySSHHostKeyInjected_Create(t *testing.T) {
 		hostKeyPub := "ssh-ed25519 " + pubKeyBody + " host"
 
 		b := docker.NewDockerfileBuilder(
-			uid, gid,
+			testInfo(uid, gid),
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
 			docker.UserStrategyCreate, "",
@@ -457,7 +468,7 @@ func TestPropertySSHHostKeyInjected_Rename(t *testing.T) {
 		hostKeyPub := "ssh-ed25519 " + pubKeyBody + " host"
 
 		b := docker.NewDockerfileBuilder(
-			uid, gid,
+			testInfo(uid, gid),
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
 			docker.UserStrategyRename, conflictingUser,
@@ -812,5 +823,136 @@ func TestPropertyVerboseModeAlwaysWritesToStdout(t *testing.T) {
 
 		require.NotEmpty(t, captured.String(),
 			"verbose mode must write content to stdout when stream contains non-empty messages")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 59: Dockerfile SSH server and user creation work for any valid username
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 59: Dockerfile SSH server and user creation work for any valid username
+// Validates: Requirements 10.2, 10.3, 22.4
+func TestPropertyDockerfileSSHAndUserForAnyUsername(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// 1. Draw a random valid Linux username
+		username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "username")
+		// 2. Draw a random home directory
+		homeDir := rapid.StringMatching(`/home/[a-z][a-z0-9]*`).Draw(t, "homeDir")
+		// 3. Draw random UID/GID in range 1000-65000
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+
+		// 4. Create *hostinfo.Info with those values
+		info := &hostinfo.Info{
+			Username: username,
+			HomeDir:  homeDir,
+			UID:      uid,
+			GID:      gid,
+		}
+
+		// 5. Build a Dockerfile
+		b := docker.NewDockerfileBuilder(
+			info,
+			fixedPublicKey,
+			fixedHostKeyPriv, fixedHostKeyPub,
+			docker.UserStrategyCreate, "",
+		)
+		b.Finalize()
+		content := b.Build()
+
+		// Assert: openssh-server installation
+		require.Contains(t, content, "openssh-server",
+			"Dockerfile must install openssh-server")
+
+		// Assert: The drawn username in useradd with correct UID/GID
+		expectedUseradd := fmt.Sprintf("useradd --uid %d --gid %d --create-home --shell /bin/bash %s", uid, gid, username)
+		require.Contains(t, content, expectedUseradd,
+			"Dockerfile must contain useradd with username %q, uid %d, gid %d", username, uid, gid)
+
+		// Assert: sshd CMD
+		require.Contains(t, content, `CMD ["/usr/sbin/sshd", "-D"]`,
+			"Dockerfile must have CMD [\"/usr/sbin/sshd\", \"-D\"]")
+
+		// Assert: The drawn username in sudoers with NOPASSWD
+		sudoersEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", username)
+		require.Contains(t, content, sudoersEntry,
+			"Dockerfile must contain sudoers entry for username %q with NOPASSWD", username)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 56: Dockerfile uses runtime-provided username and home directory
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 56: Dockerfile uses runtime-provided username and home directory
+// Validates: Requirements 22.1, 22.2, 22.4, 22.5
+func TestPropertyDockerfileUsesRuntimeUsernameAndHomeDir(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// Draw a random valid Linux username
+		username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "username")
+		// Draw a random valid home directory
+		homeDir := rapid.StringMatching(`/[a-z][a-z0-9/]*`).Draw(t, "homeDir")
+		// Draw random UID/GID in range 1000-65000
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+
+		// Create a *hostinfo.Info with those values
+		info := &hostinfo.Info{
+			Username: username,
+			HomeDir:  homeDir,
+			UID:      uid,
+			GID:      gid,
+		}
+
+		// Build a Dockerfile using NewDockerfileBuilder
+		b := docker.NewDockerfileBuilder(
+			info,
+			fixedPublicKey,
+			fixedHostKeyPriv, fixedHostKeyPub,
+			docker.UserStrategyCreate, "",
+		)
+		content := b.Build()
+
+		// Assert the Dockerfile contains the drawn username in useradd
+		require.Contains(t, content, "useradd",
+			"Dockerfile must contain useradd")
+		require.Contains(t, content, fmt.Sprintf("useradd --uid %d --gid %d --create-home --shell /bin/bash %s", uid, gid, username),
+			"useradd must reference the drawn username %q", username)
+
+		// Assert the Dockerfile contains the drawn username in sudoers
+		sudoersLine := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", username)
+		require.Contains(t, content, sudoersLine,
+			"sudoers must reference the drawn username %q", username)
+
+		// Assert the Dockerfile contains the drawn username in chown
+		chownFragment := fmt.Sprintf("chown -R %s:%s", username, username)
+		require.Contains(t, content, chownFragment,
+			"chown must reference the drawn username %q", username)
+
+		// Assert the Dockerfile contains the drawn home directory in authorized_keys path
+		authorizedKeysPath := homeDir + "/.ssh/authorized_keys"
+		require.Contains(t, content, authorizedKeysPath,
+			"Dockerfile must reference authorized_keys at %q", authorizedKeysPath)
+
+		// If the username is NOT "dev", assert the Dockerfile does NOT contain "dev"
+		// as a standalone username reference in useradd/sudoers lines
+		if username != "dev" {
+			for _, line := range strings.Split(content, "\n") {
+				if strings.Contains(line, "useradd") {
+					require.NotContains(t, line, " dev",
+						"useradd line must not contain hardcoded 'dev' when username is %q", username)
+				}
+				if strings.Contains(line, "sudoers") {
+					require.NotContains(t, line, "dev ALL=",
+						"sudoers line must not contain hardcoded 'dev' when username is %q", username)
+				}
+			}
+		}
+
+		// If the home directory is NOT "/home/dev", assert the Dockerfile does NOT contain "/home/dev"
+		if homeDir != "/home/dev" {
+			require.NotContains(t, content, "/home/dev",
+				"Dockerfile must not contain hardcoded '/home/dev' when homeDir is %q", homeDir)
+		}
 	})
 }

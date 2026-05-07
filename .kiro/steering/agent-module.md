@@ -163,7 +163,7 @@ Agent modules may import:
 - Standard library packages
 
 Agent modules must **NOT** import:
-- `cmd`, `naming`, `ssh`, `credentials`, `datadir`, `portfinder`, `docker/runner`
+- `cmd`, `naming`, `ssh`, `datadir`, `docker/runner`
 - Any other agent module
 
 ## Naming Convention

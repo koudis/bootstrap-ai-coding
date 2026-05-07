@@ -39,8 +39,8 @@ func (a *claudeAgent) Install(b *docker.DockerfileBuilder) {
 	// login/onboarding flow on every container start.
 	b.Run(fmt.Sprintf(
 		"ln -sf %s/claude.json %s/.claude.json",
-		filepath.Join(constants.ContainerUserHome, ".claude"),
-		constants.ContainerUserHome,
+		filepath.Join(b.HomeDir(), ".claude"),
+		b.HomeDir(),
 	))
 }
 
@@ -49,8 +49,8 @@ func (a *claudeAgent) CredentialStorePath() string {
 	return filepath.Join(home, ".claude")
 }
 
-func (a *claudeAgent) ContainerMountPath() string {
-	return filepath.Join(constants.ContainerUserHome, ".claude")
+func (a *claudeAgent) ContainerMountPath(homeDir string) string {
+	return filepath.Join(homeDir, ".claude")
 }
 
 func (a *claudeAgent) HasCredentials(storePath string) (bool, error) {

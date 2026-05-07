@@ -13,7 +13,7 @@ type Agent interface {
 	ID() string
 	Install(b *docker.DockerfileBuilder)
 	CredentialStorePath() string
-	ContainerMountPath() string
+	ContainerMountPath(homeDir string) string
 	HasCredentials(storePath string) (bool, error)
 	HealthCheck(ctx context.Context, c *docker.Client, containerID string) error
 }

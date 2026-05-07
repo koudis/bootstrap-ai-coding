@@ -10,14 +10,6 @@ const (
 	// Corresponds to the Base_Container_Image glossary term.
 	BaseContainerImage = "ubuntu:26.04"
 
-	// ContainerUser is the non-root username inside the container.
-	// Corresponds to the Container_User glossary term.
-	ContainerUser = "dev"
-
-	// ContainerUserHome is the home directory of ContainerUser inside the container.
-	// Derived as /home/<ContainerUser>.
-	ContainerUserHome = "/home/" + ContainerUser
-
 	// WorkspaceMountPath is the path inside the container where the project is mounted.
 	// Corresponds to the Mounted_Volume glossary term.
 	WorkspaceMountPath = "/workspace"

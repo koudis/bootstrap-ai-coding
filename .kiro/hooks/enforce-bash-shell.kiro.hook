@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Enforce Bash Shell",
+  "description": "Before any shell command is executed, remind the agent to prefix the command with 'bash -c' to explicitly use bash as the shell.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "shell"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "You MUST wrap the command with `bash -c \"...\"` to explicitly use bash as the shell. Rewrite the command as: bash -c \"original command here\". Do not run the command directly without the bash -c wrapper."
+  }
+}

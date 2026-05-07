@@ -1,4 +1,4 @@
-package portfinder_test
+package datadir_test
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
-	"github.com/koudis/bootstrap-ai-coding/internal/portfinder"
+	"github.com/koudis/bootstrap-ai-coding/internal/datadir"
 )
 
 // Feature: bootstrap-ai-coding, Property 20: Port finder returns the first free port at or above constants.SSHPortStart
@@ -41,7 +41,7 @@ func TestPortFinderReturnsFirstFreePort(t *testing.T) {
 		})
 
 		// Call FindFreePort and verify the result.
-		got, err := portfinder.FindFreePort()
+		got, err := datadir.FindFreePort()
 		require.NoError(t, err)
 
 		// Property: returned port is always >= constants.SSHPortStart
@@ -55,7 +55,7 @@ func TestPortFinderReturnsFirstFreePort(t *testing.T) {
 		}
 		listeners = nil // prevent double-close in Cleanup
 
-		require.True(t, portfinder.IsPortFree(got),
+		require.True(t, datadir.IsPortFree(got),
 			"IsPortFree(%d) should be true for the port returned by FindFreePort()", got)
 	})
 }

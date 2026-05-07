@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +18,11 @@ import (
 
 	"github.com/koudis/bootstrap-ai-coding/internal/agent"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
-	"github.com/koudis/bootstrap-ai-coding/internal/credentials"
 	"github.com/koudis/bootstrap-ai-coding/internal/datadir"
 	dockerpkg "github.com/koudis/bootstrap-ai-coding/internal/docker"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 	"github.com/koudis/bootstrap-ai-coding/internal/naming"
 	"github.com/koudis/bootstrap-ai-coding/internal/pathutil"
-	"github.com/koudis/bootstrap-ai-coding/internal/portfinder"
 	sshpkg "github.com/koudis/bootstrap-ai-coding/internal/ssh"
 )
 
@@ -381,6 +378,11 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return fmt.Errorf("project path %s does not exist", absPath)
 	}
 
+	info, err := hostinfo.Current()
+	if err != nil {
+		return err
+	}
+
 	publicKey, err := sshpkg.DiscoverPublicKey(flagSSHKey)
 	if err != nil {
 		return err
@@ -410,7 +412,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		// If the persisted port is in use by something other than our own container,
 		// report an error. If our container is already running (it holds the port),
 		// this is the normal reconnect path — no error.
-		if sshPort != 0 && !portfinder.IsPortFree(sshPort) {
+		if sshPort != 0 && !datadir.IsPortFree(sshPort) {
 			containerInfo, inspectErr := dockerpkg.InspectContainer(ctx, c, containerName)
 			if inspectErr != nil {
 				return inspectErr
@@ -422,7 +424,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		}
 	}
 	if sshPort == 0 {
-		sshPort, err = portfinder.FindFreePort()
+		sshPort, err = datadir.FindFreePort()
 		if err != nil {
 			return err
 		}
@@ -453,8 +455,8 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	var agentStatuses []agentCredStatus
 
 	for _, a := range enabledAgents {
-		resolved := credentials.Resolve(a.CredentialStorePath(), "")
-		if err := credentials.EnsureDir(resolved); err != nil {
+		resolved := datadir.ResolveCredentialPath(a.CredentialStorePath(), "")
+		if err := datadir.EnsureCredentialDir(resolved); err != nil {
 			return fmt.Errorf("ensuring credential dir for %s: %w", a.ID(), err)
 		}
 		// If the agent implements CredentialPreparer, let it sync external
@@ -508,22 +510,17 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	if needBuild {
-		uid, gid, err := hostUIDGID()
-		if err != nil {
-			return err
-		}
-
 		// Check for UID/GID conflict in base image
 		strategy := dockerpkg.UserStrategyCreate
 		conflictingUser := ""
-		conflictingImageUser, err := dockerpkg.FindConflictingUser(ctx, c, uid, gid)
+		conflictingImageUser, err := dockerpkg.FindConflictingUser(ctx, c, info.UID, info.GID)
 		if err != nil {
 			return fmt.Errorf("checking base image for UID/GID conflicts: %w", err)
 		}
 		if conflictingImageUser != nil {
 			fmt.Printf("User %q (UID %d, GID %d) already exists in the base image.\nRename it to %q? [y/N]: ",
 				conflictingImageUser.Username, conflictingImageUser.UID, conflictingImageUser.GID,
-				constants.ContainerUser)
+				info.Username)
 			reader := bufio.NewReader(os.Stdin)
 			answer, _ := reader.ReadString('\n')
 			answer = strings.TrimSpace(strings.ToLower(answer))
@@ -536,7 +533,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			}
 		}
 
-		b := dockerpkg.NewDockerfileBuilder(uid, gid, publicKey, hostKeyPriv, hostKeyPub, strategy, conflictingUser)
+		b := dockerpkg.NewDockerfileBuilder(info, publicKey, hostKeyPriv, hostKeyPub, strategy, conflictingUser)
 		for _, a := range enabledAgents {
 			a.Install(b)
 		}
@@ -550,8 +547,8 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   imageTag,
 			Dockerfile: b.Build(),
 			Labels:     labels,
-			HostUID:    uid,
-			HostGID:    gid,
+			HostUID:    info.UID,
+			HostGID:    info.GID,
 			NoCache:    flagRebuild,
 		}
 
@@ -563,18 +560,18 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		}
 	}
 
-	info, err := dockerpkg.InspectContainer(ctx, c, containerName)
+	containerInfo, err := dockerpkg.InspectContainer(ctx, c, containerName)
 	if err != nil {
 		return err
 	}
-	if info != nil && info.State != nil && info.State.Running {
+	if containerInfo != nil && containerInfo.State != nil && containerInfo.State.Running {
 		if !flagRebuild {
 			// Sync known_hosts even when reconnecting to an already-running container (Req 18.1).
 			if err := sshpkg.SyncKnownHosts(sshPort, hostKeyPub, flagNoUpdateKnownHosts); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: syncing known_hosts: %v\n", err)
 			}
 			// Sync SSH config entry (Req 19.1).
-			if err := sshpkg.SyncSSHConfig(containerName, sshPort, flagNoUpdateSSHConfig); err != nil {
+			if err := sshpkg.SyncSSHConfig(containerName, sshPort, info.Username, flagNoUpdateSSHConfig); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: syncing SSH config: %v\n", err)
 			}
 			printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
@@ -584,10 +581,10 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		fmt.Println("Stopping existing container for rebuild...")
 		_ = dockerpkg.StopContainer(ctx, c, containerName)
 		_ = dockerpkg.RemoveContainer(ctx, c, containerName)
-		info = nil
+		containerInfo = nil
 	}
 
-	if info != nil {
+	if containerInfo != nil {
 		_ = dockerpkg.RemoveContainer(ctx, c, containerName)
 	}
 
@@ -597,7 +594,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	for _, s := range agentStatuses {
 		mounts = append(mounts, dockerpkg.Mount{
 			HostPath:      s.resolvedPath,
-			ContainerPath: s.a.ContainerMountPath(),
+			ContainerPath: s.a.ContainerMountPath(info.HomeDir),
 		})
 	}
 
@@ -627,7 +624,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		fmt.Fprintf(os.Stderr, "warning: syncing known_hosts: %v\n", err)
 	}
 	// Sync SSH config entry (Req 19.1).
-	if err := sshpkg.SyncSSHConfig(containerName, sshPort, flagNoUpdateSSHConfig); err != nil {
+	if err := sshpkg.SyncSSHConfig(containerName, sshPort, info.Username, flagNoUpdateSSHConfig); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: syncing SSH config: %v\n", err)
 	}
 
@@ -650,22 +647,6 @@ func printSessionSummary(dd *datadir.DataDir, projectDir string, containerName s
 		EnabledAgents: agentIDs,
 	}
 	fmt.Print(FormatSessionSummary(summary))
-}
-
-func hostUIDGID() (int, int, error) {
-	u, err := user.Current()
-	if err != nil {
-		return 0, 0, fmt.Errorf("getting current user: %w", err)
-	}
-	uid, err := strconv.Atoi(u.Uid)
-	if err != nil {
-		return 0, 0, fmt.Errorf("parsing UID: %w", err)
-	}
-	gid, err := strconv.Atoi(u.Gid)
-	if err != nil {
-		return 0, 0, fmt.Errorf("parsing GID: %w", err)
-	}
-	return uid, gid, nil
 }
 
 // StringSlicesEqual reports whether a and b contain the same elements in the same order.

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/pathutil"
 )
 
 // DataDir represents the Tool_Data_Dir for a single project.
@@ -20,7 +21,7 @@ type DataDir struct {
 // New returns a DataDir for the given container name, creating the directory
 // (and all parents) with constants.ToolDataDirPerm if it does not exist.
 func New(containerName string) (*DataDir, error) {
-	root := expandHome(constants.ToolDataDirRoot)
+	root := pathutil.ExpandHome(constants.ToolDataDirRoot)
 	p := filepath.Join(root, containerName)
 	if err := os.MkdirAll(p, constants.ToolDataDirPerm); err != nil {
 		return nil, fmt.Errorf("creating data dir %s: %w", p, err)
@@ -121,14 +122,14 @@ func (d *DataDir) WriteManifest(agentIDs []string) error {
 
 // PurgeRoot removes the entire Tool_Data_Dir root and all its contents.
 func PurgeRoot() error {
-	return os.RemoveAll(expandHome(constants.ToolDataDirRoot))
+	return os.RemoveAll(pathutil.ExpandHome(constants.ToolDataDirRoot))
 }
 
 // ListContainerNames returns the names of all subdirectories under the
 // Tool_Data_Dir root. Each name corresponds to a container that has persisted
 // data. Returns nil (not an error) if the root directory does not exist.
 func ListContainerNames() ([]string, error) {
-	root := expandHome(constants.ToolDataDirRoot)
+	root := pathutil.ExpandHome(constants.ToolDataDirRoot)
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -145,10 +146,3 @@ func ListContainerNames() ([]string, error) {
 	return names, nil
 }
 
-func expandHome(p string) string {
-	if len(p) >= 2 && p[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, p[2:])
-	}
-	return p
-}

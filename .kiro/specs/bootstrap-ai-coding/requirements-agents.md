@@ -61,6 +61,7 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 2. THE Claude Code module SHALL declare `<Container_User_Home>/.claude` as its Credential_Volume mount path inside the Container.
 3. THE Credential_Volume SHALL be a bind-mount so that authentication tokens written inside the Container are immediately persisted to the Host Credential_Store.
 4. Authentication tokens persisted in the Host Credential_Store SHALL be available in future Sessions without re-authentication.
+5. NOTE: Claude Code also stores onboarding state in `~/.claude.json` (outside the credential directory). See Requirement CC-8 for how this is handled via symlink and host-side synchronisation.
 
 ---
 
@@ -89,6 +90,21 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 
 ---
 
+### Requirement CC-7: Headless Keyring for Credential Persistence
+
+**User Story:** As a developer, I want Claude Code to be able to read and refresh its OAuth tokens inside the container without a graphical desktop, so I don't have to re-authenticate every time I connect.
+
+#### Acceptance Criteria
+
+1. THE container image SHALL include a D-Bus session bus and a Secret Service–compatible keyring daemon (gnome-keyring) capable of running without a graphical display.
+2. THE keyring daemon SHALL be started automatically when the Container_User's SSH session begins, using an empty password to unlock the default keyring.
+3. Claude Code (and any other tool using `libsecret` / D-Bus Secret Service API) SHALL be able to store and retrieve credentials via the running keyring daemon without user interaction.
+4. THE `DBUS_SESSION_BUS_ADDRESS` environment variable SHALL be set correctly for the Container_User's session so that client applications can locate the session bus.
+5. THE keyring setup SHALL NOT interfere with the existing SSH-based authentication or the bind-mounted `~/.claude` credential store.
+6. THE keyring packages and startup configuration SHALL be installed as part of the base container image (in `DockerfileBuilder`), not in individual agent modules, since multiple agents and IDE extensions may benefit from it.
+
+---
+
 ### Requirement CC-6: No Core Coupling
 
 **User Story:** As a platform maintainer, I want the Claude Code module to be fully self-contained so that removing or replacing it requires no changes to core code.
@@ -98,6 +114,20 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 1. THE Claude Code module SHALL NOT be referenced by name or identifier anywhere in the core application code.
 2. THE Claude Code module SHALL register itself with the Agent_Registry without requiring any modification to core source files.
 3. THE core application SHALL function correctly (with no enabled agents) if the Claude Code module is not compiled in.
+
+---
+
+### Requirement CC-8: Onboarding State Synchronisation
+
+**User Story:** As a developer, I want my Claude Code onboarding state to persist across container recreations, so I am not prompted to complete the onboarding flow every time the container is rebuilt.
+
+#### Acceptance Criteria
+
+1. Claude Code stores its onboarding state (including `hasCompletedOnboarding`) in `~/.claude.json` on the Host — a file in the home directory root, separate from the `~/.claude/` credential directory.
+2. THE Claude Code module SHALL create a symlink inside the Container at `<Container_User_Home>/.claude.json` pointing to `<Container_User_Home>/.claude/claude.json`, so that Claude Code reads and writes its onboarding state through the bind-mounted Credential_Volume.
+3. THE Claude Code module SHALL implement the `CredentialPreparer` interface. Its `PrepareCredentials` method SHALL copy `~/.claude.json` from the Host home directory into the Credential_Store as `claude.json`, but only when the source file exists and is newer than the destination (or the destination is absent).
+4. THE combination of the symlink (inside the container) and the host-side copy (before mount) SHALL ensure that a single bind-mount on `~/.claude/` persists both OAuth tokens and onboarding state across container rebuilds and restarts.
+5. IF `~/.claude.json` does not exist on the Host (first-time user), THE `PrepareCredentials` method SHALL silently skip the copy without error.
 
 ---
 

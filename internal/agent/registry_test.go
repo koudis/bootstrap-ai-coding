@@ -20,7 +20,7 @@ func (s *stubAgent) Install(_ *docker.DockerfileBuilder)                     {}
 func (s *stubAgent) CredentialStorePath() string                             { return "" }
 func (s *stubAgent) ContainerMountPath() string                              { return "" }
 func (s *stubAgent) HasCredentials(_ string) (bool, error)                   { return false, nil }
-func (s *stubAgent) HealthCheck(_ context.Context, _ string) error           { return nil }
+func (s *stubAgent) HealthCheck(_ context.Context, _ *docker.Client, _ string) error { return nil }
 
 // newStub is a convenience constructor.
 func newStub(id string) agent.Agent { return &stubAgent{id: id} }

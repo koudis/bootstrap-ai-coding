@@ -72,9 +72,17 @@ func (a *aiderAgent) HasCredentials(storePath string) (bool, error) {
 }
 
 // HealthCheck verifies the agent is installed and runnable inside the container.
-// Called by the core after the container starts.
-func (a *aiderAgent) HealthCheck(ctx context.Context, containerID string) error {
-    return execInContainer(ctx, containerID, []string{"aider", "--version"})
+// Called by the core after the container starts. The *docker.Client is passed
+// through from the caller — do not create a new client.
+func (a *aiderAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
+    exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"aider", "--version"})
+    if err != nil {
+        return fmt.Errorf("aider health check failed: %w", err)
+    }
+    if exitCode != 0 {
+        return fmt.Errorf("aider health check failed: exit code %d", exitCode)
+    }
+    return nil
 }
 ```
 
@@ -143,14 +151,15 @@ Add a new section to `.kiro/specs/bootstrap-ai-coding/requirements-agents.md` fo
 | `CredentialStorePath()` | Default host path for auth tokens; may use `~/` prefix |
 | `ContainerMountPath()` | Absolute path inside container; use `constants.ContainerUserHome` as base |
 | `HasCredentials(path)` | `(true, nil)` if tokens exist; `(false, nil)` if empty; `(false, err)` on error |
-| `HealthCheck(ctx, id)` | `nil` if agent is ready; non-nil error if not |
+| `HealthCheck(ctx, c, id)` | `nil` if agent is ready; non-nil error if not. `c` is the existing `*docker.Client` — do not create a new one. |
 
 ## Import Rules for Agent Modules
 
 Agent modules may import:
 - `github.com/koudis/bootstrap-ai-coding/internal/agent` — to call `agent.Register()`
-- `github.com/koudis/bootstrap-ai-coding/internal/docker` — for `*docker.DockerfileBuilder`
+- `github.com/koudis/bootstrap-ai-coding/internal/docker` — for `*docker.DockerfileBuilder` and `*docker.Client`
 - `github.com/koudis/bootstrap-ai-coding/internal/constants` — for `ContainerUserHome` and other glossary values
+- `github.com/koudis/bootstrap-ai-coding/internal/pathutil` — for `ExpandHome` if needed
 - Standard library packages
 
 Agent modules must **NOT** import:

@@ -299,38 +299,6 @@ func TestPropertyStringSlicesEqualReflexiveAndSymmetric(t *testing.T) {
 	})
 }
 
-// ── Unit tests for ExpandHome ─────────────────────────────────────────────────
-
-func TestExpandHomeNoTilde(t *testing.T) {
-	require.Equal(t, "/absolute/path", cmd.ExpandHome("/absolute/path"))
-}
-
-func TestExpandHomeRelativePath(t *testing.T) {
-	require.Equal(t, "relative/path", cmd.ExpandHome("relative/path"))
-}
-
-func TestExpandHomeTildeExpanded(t *testing.T) {
-	result := cmd.ExpandHome("~/somedir")
-	require.NotContains(t, result, "~", "ExpandHome must expand ~ to the home directory")
-	require.Contains(t, result, "somedir")
-}
-
-func TestExpandHomeTildeOnly(t *testing.T) {
-	// "~" alone (no slash) should not be expanded.
-	require.Equal(t, "~", cmd.ExpandHome("~"))
-}
-
-// Feature: bootstrap-ai-coding, Property 26: ExpandHome never returns a path starting with ~/
-func TestPropertyExpandHomeNeverReturnsTilde(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		input := rapid.String().Draw(t, "input")
-		result := cmd.ExpandHome(input)
-		require.False(t,
-			len(result) >= 2 && result[:2] == "~/",
-			"ExpandHome(%q) = %q must not start with ~/", input, result)
-	})
-}
-
 // TestVerboseFlagWithStopRejected verifies that --verbose is rejected when
 // used with --stop-and-remove (CLI-3).
 // Validates: Req 20.5, CLI-3

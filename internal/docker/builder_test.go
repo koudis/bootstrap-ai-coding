@@ -499,6 +499,69 @@ func TestBuilderCmdAppendsCorrectInstruction(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Property 52: Headless keyring packages are always installed in the base layer
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 52: Headless keyring packages are always installed in the base layer
+// Validates: CC-7
+func TestPropertyKeyringPackagesInstalled(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+
+		b := newCreateBuilder(uid, gid)
+		content := b.Build()
+
+		require.Contains(t, content, "dbus-x11",
+			"Dockerfile must install dbus-x11 for dbus-launch")
+		require.Contains(t, content, "gnome-keyring",
+			"Dockerfile must install gnome-keyring for Secret Service")
+		require.Contains(t, content, "libsecret-1-0",
+			"Dockerfile must install libsecret-1-0 for client access")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Property 53: Keyring profile script is always created at constants.KeyringProfileScript
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 53: Keyring profile script is always created at constants.KeyringProfileScript
+// Validates: CC-7
+func TestPropertyKeyringProfileScriptCreated(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+
+		b := newCreateBuilder(uid, gid)
+		content := b.Build()
+
+		require.Contains(t, content, constants.KeyringProfileScript,
+			"Dockerfile must reference KeyringProfileScript path %q", constants.KeyringProfileScript)
+		require.Contains(t, content, "dbus-launch",
+			"Keyring script must start dbus-launch")
+		require.Contains(t, content, "gnome-keyring-daemon",
+			"Keyring script must start gnome-keyring-daemon")
+		require.Contains(t, content, "--unlock",
+			"Keyring script must unlock the keyring")
+		require.Contains(t, content, "chmod +x",
+			"Keyring script must be made executable")
+	})
+}
+
+// TestKeyringProfileScriptPresentInRenameStrategy verifies that the keyring
+// setup is also present when using UserStrategyRename.
+// Validates: CC-7
+func TestKeyringProfileScriptPresentInRenameStrategy(t *testing.T) {
+	b := newRenameBuilder(1000, 1000, "ubuntu")
+	content := b.Build()
+
+	require.Contains(t, content, "gnome-keyring",
+		"Rename strategy Dockerfile must also install gnome-keyring")
+	require.Contains(t, content, constants.KeyringProfileScript,
+		"Rename strategy Dockerfile must also create keyring profile script")
+}
+
+// ---------------------------------------------------------------------------
 // Node.js deduplication tracking tests
 // ---------------------------------------------------------------------------
 

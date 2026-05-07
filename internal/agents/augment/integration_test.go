@@ -26,11 +26,19 @@ import (
 	"github.com/koudis/bootstrap-ai-coding/internal/testutil"
 )
 
-// TestMain gates the integration suite behind an explicit consent prompt.
-// Integration tests can delete, update and pull Docker images.
+// Package-level shared container state — built once in TestMain, reused by all tests.
+var (
+	sharedContainerName string
+	sharedSSHPort       int
+	sharedClient        *docker.Client
+	sharedImageTag      string
+)
+
+// TestMain gates the integration suite behind an explicit consent prompt,
+// builds the container image once, starts the container, and tears it down
+// after all tests complete.
 func TestMain(m *testing.M) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		// Docker not available — individual tests will skip themselves.
 		os.Exit(m.Run())
 	}
 
@@ -41,44 +49,60 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	os.Exit(m.Run())
-}
-
-// setupContainerWithAugment builds a container image with the Augment Code
-// agent installed, starts the container, waits for SSH to be ready, and
-// returns the container name, SSH port, and a cleanup function.
-func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int, cleanup func()) {
-	t.Helper()
-
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker not available")
+	if err := setupSharedContainer(); err != nil {
+		fmt.Fprintf(os.Stderr, "setupSharedContainer: %v\n", err)
+		os.Exit(1)
 	}
 
+	code := m.Run()
+
+	teardownSharedContainer()
+	os.Exit(code)
+}
+
+func setupSharedContainer() error {
 	ctx := context.Background()
 
-	projectDir := t.TempDir()
+	projectDir, err := os.MkdirTemp("", "bac-augment-integration-*")
+	if err != nil {
+		return fmt.Errorf("creating temp dir: %w", err)
+	}
 	dirName := filepath.Base(projectDir)
 
 	hostKeyPriv, hostKeyPub, err := sshpkg.GenerateHostKeyPair()
-	require.NoError(t, err, "generating host key pair")
+	if err != nil {
+		return fmt.Errorf("generating host key pair: %w", err)
+	}
 
 	_, userPubKey, err := sshpkg.GenerateHostKeyPair()
-	require.NoError(t, err, "generating user key pair")
+	if err != nil {
+		return fmt.Errorf("generating user key pair: %w", err)
+	}
 
 	u, err := user.Current()
-	require.NoError(t, err, "getting current user")
+	if err != nil {
+		return fmt.Errorf("getting current user: %w", err)
+	}
 	uid, err := strconv.Atoi(u.Uid)
-	require.NoError(t, err, "parsing UID")
+	if err != nil {
+		return fmt.Errorf("parsing UID: %w", err)
+	}
 	gid, err := strconv.Atoi(u.Gid)
-	require.NoError(t, err, "parsing GID")
+	if err != nil {
+		return fmt.Errorf("parsing GID: %w", err)
+	}
 
-	client, err := docker.NewClient()
-	require.NoError(t, err, "connecting to Docker daemon")
+	sharedClient, err = docker.NewClient()
+	if err != nil {
+		return fmt.Errorf("connecting to Docker daemon: %w", err)
+	}
 
 	strategy := docker.UserStrategyCreate
 	conflictingUser := ""
-	conflictingImageUser, err := docker.FindConflictingUser(ctx, client, uid, gid)
-	require.NoError(t, err, "checking base image for UID/GID conflicts")
+	conflictingImageUser, err := docker.FindConflictingUser(ctx, sharedClient, uid, gid)
+	if err != nil {
+		return fmt.Errorf("checking base image for UID/GID conflicts: %w", err)
+	}
 	if conflictingImageUser != nil {
 		strategy = docker.UserStrategyRename
 		conflictingUser = conflictingImageUser.Username
@@ -91,23 +115,26 @@ func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int,
 		strategy, conflictingUser,
 	)
 
-	// Install the Augment Code agent steps into the Dockerfile.
 	augmentAgent, err := agent.Lookup(constants.AugmentCodeAgentName)
-	require.NoError(t, err, "looking up augment agent")
+	if err != nil {
+		return fmt.Errorf("looking up augment agent: %w", err)
+	}
 	augmentAgent.Install(builder)
 
 	port, err := findFreePortAugment()
-	require.NoError(t, err, "finding free port")
+	if err != nil {
+		return fmt.Errorf("finding free port: %w", err)
+	}
 
-	containerName = constants.ContainerNamePrefix + sanitizeAugment(dirName)
-	imageTag := containerName + ":latest"
+	sharedContainerName = constants.ContainerNamePrefix + sanitizeAugment(dirName)
+	sharedImageTag = sharedContainerName + ":latest"
+	sharedSSHPort = port
 
-	// CMD must be the last instruction — call Finalize() before Build().
 	builder.Finalize()
 
 	spec := docker.ContainerSpec{
-		Name:       containerName,
-		ImageTag:   imageTag,
+		Name:       sharedContainerName,
+		ImageTag:   sharedImageTag,
 		Dockerfile: builder.Build(),
 		Mounts: []docker.Mount{
 			{
@@ -124,34 +151,44 @@ func setupContainerWithAugment(t *testing.T) (containerName string, sshPort int,
 		HostGID: gid,
 	}
 
-	_, err = docker.BuildImage(ctx, client, spec, true)
-	require.NoError(t, err, "building container image with augment")
+	_, err = docker.BuildImage(ctx, sharedClient, spec, true)
+	if err != nil {
+		return fmt.Errorf("building container image with augment: %w", err)
+	}
 
-	_, err = docker.CreateContainer(ctx, client, spec)
-	require.NoError(t, err, "creating container")
+	_, err = docker.CreateContainer(ctx, sharedClient, spec)
+	if err != nil {
+		return fmt.Errorf("creating container: %w", err)
+	}
 
-	err = docker.StartContainer(ctx, client, containerName)
-	require.NoError(t, err, "starting container")
+	err = docker.StartContainer(ctx, sharedClient, sharedContainerName)
+	if err != nil {
+		return fmt.Errorf("starting container: %w", err)
+	}
 
-	// Augment installation takes longer — allow up to 2 minutes for SSH.
 	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 120*time.Second)
-	require.NoError(t, err, "waiting for SSH to be ready")
+	if err != nil {
+		return fmt.Errorf("waiting for SSH to be ready: %w", err)
+	}
 
-	cleanup = func() {
-		cleanCtx := context.Background()
-		_ = docker.StopContainer(cleanCtx, client, containerName)
-		_ = docker.RemoveContainer(cleanCtx, client, containerName)
-		images, _ := docker.ListBACImages(cleanCtx, client)
-		for _, img := range images {
-			for _, tag := range img.RepoTags {
-				if tag == imageTag {
-					_, _ = client.ImageRemove(cleanCtx, img.ID, dockerimage.RemoveOptions{Force: true})
-				}
+	return nil
+}
+
+func teardownSharedContainer() {
+	ctx := context.Background()
+	if sharedClient == nil {
+		return
+	}
+	_ = docker.StopContainer(ctx, sharedClient, sharedContainerName)
+	_ = docker.RemoveContainer(ctx, sharedClient, sharedContainerName)
+	images, _ := docker.ListBACImages(ctx, sharedClient)
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if tag == sharedImageTag {
+				_, _ = sharedClient.ImageRemove(ctx, img.ID, dockerimage.RemoveOptions{Force: true})
 			}
 		}
 	}
-
-	return containerName, port, cleanup
 }
 
 // ----------------------------------------------------------------------------
@@ -164,13 +201,9 @@ func TestAugmentAvailableInContainer(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	containerName, _, cleanup := setupContainerWithAugment(t)
-	t.Cleanup(cleanup)
-
 	ctx := context.Background()
 
-	// Exec `auggie --version` inside the container and assert exit 0.
-	exitCode, err := docker.ExecInContainer(ctx, containerName, []string{"auggie", "--version"})
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"auggie", "--version"})
 	require.NoError(t, err, "exec auggie --version")
 	require.Equal(t, 0, exitCode, "expected 'auggie --version' to exit 0")
 }
@@ -185,15 +218,12 @@ func TestAugmentHealthCheck(t *testing.T) {
 		t.Skip("docker not available")
 	}
 
-	containerName, _, cleanup := setupContainerWithAugment(t)
-	t.Cleanup(cleanup)
-
 	ctx := context.Background()
 
 	augAgent, err := agent.Lookup(constants.AugmentCodeAgentName)
 	require.NoError(t, err, "looking up augment agent")
 
-	err = augAgent.HealthCheck(ctx, containerName)
+	err = augAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
 	require.NoError(t, err, "augment HealthCheck should return no error")
 }
 

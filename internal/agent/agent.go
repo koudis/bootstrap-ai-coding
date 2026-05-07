@@ -15,5 +15,6 @@ type Agent interface {
 	CredentialStorePath() string
 	ContainerMountPath() string
 	HasCredentials(storePath string) (bool, error)
-	HealthCheck(ctx context.Context, containerID string) error
+	HealthCheck(ctx context.Context, c *docker.Client, containerID string) error
 }
+

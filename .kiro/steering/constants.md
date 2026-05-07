@@ -38,6 +38,7 @@ This means:
 | `KnownHostsFile` | `"~/.ssh/known_hosts"` | Known_Hosts_File (Req 18) |
 | `SSHConfigFile` | `"~/.ssh/config"` | SSH_Config_File (Req 19) |
 | `SSHDirPerm` | `0o700` | ~/.ssh directory permissions (Req 18.5) |
+| `HostBindIP` | `"127.0.0.1"` | IP address containers bind SSH port to on the host (Req R7) |
 | `ImageBuildTimeout` | `8 * time.Minute` | Image_Build_Timeout (Req 14.7) |
 
 ### Variables (not const — Go does not support slice/map constants)

@@ -94,6 +94,15 @@ const (
 	// SSHDirPerm is the permission for the ~/.ssh directory on the Host.
 	// Satisfies Req 18.5.
 	SSHDirPerm = 0o700
+
+	// KeyringProfileScript is the path to the shell profile script inside the
+	// container that starts D-Bus and gnome-keyring-daemon on SSH login.
+	// Satisfies CC-7.
+	KeyringProfileScript = "/etc/profile.d/dbus-keyring.sh"
+
+	// HostBindIP is the IP address containers bind their SSH port to on the host.
+	// Satisfies R7.
+	HostBindIP = "127.0.0.1"
 )
 
 // ImageBuildTimeout is the maximum time allowed for a Docker image build.

@@ -8,11 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/pathutil"
 )
 
 // DiscoverPublicKey returns the contents of the first Public_Key found on the Host.
@@ -26,7 +26,7 @@ func DiscoverPublicKey(sshKeyFlag string) (string, error) {
 	candidates = append(candidates, constants.PublicKeyDefaultPaths...)
 
 	for _, p := range candidates {
-		expanded := expandHome(p)
+		expanded := pathutil.ExpandHome(p)
 		data, err := os.ReadFile(expanded)
 		if err == nil {
 			return string(data), nil
@@ -60,10 +60,3 @@ func GenerateHostKeyPair() (priv, pub string, err error) {
 	return privStr, pubStr, nil
 }
 
-func expandHome(p string) string {
-	if len(p) >= 2 && p[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, p[2:])
-	}
-	return p
-}

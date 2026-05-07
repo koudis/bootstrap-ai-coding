@@ -320,12 +320,48 @@ RUN SSH authorized_keys                     ← stable per user key, cached
 RUN SSH host key injection                  ← stable per project, cached
 RUN sshd_config hardening                   ← stable, cached
 RUN mkdir /run/sshd                         ← stable, cached
+RUN apt-get install dbus-x11 gnome-keyring libsecret-1-0  ← keyring (CC-7), cached
+RUN install /etc/profile.d/dbus-keyring.sh  ← keyring startup script, cached
 RUN apt-get install curl ca-certificates    ← agent step, cached after first build
 RUN nodesource setup + nodejs               ← agent step, cached after first build
 RUN npm install -g @augmentcode/auggie      ← agent step, cached after first build
 RUN echo manifest > /bac-manifest.json     ← stable when agents unchanged, cached
 CMD ["/usr/sbin/sshd", "-D"]               ← always last (Req 21.2)
 ```
+
+### Headless Keyring (D-Bus + gnome-keyring-daemon)
+
+The container runs a headless `gnome-keyring-daemon` so that tools using `libsecret` / D-Bus Secret Service API (Claude Code, VS Code extensions) can store and retrieve OAuth tokens without a graphical desktop.
+
+**Installed in the base layer** (inside `NewDockerfileBuilder`), not in individual agent modules, because multiple agents and IDE extensions benefit from it.
+
+**Packages installed:**
+- `dbus-x11` — provides `dbus-launch` for starting a session bus
+- `gnome-keyring` — Secret Service provider
+- `libsecret-1-0` — client library (used by Node.js `keytar` / `libsecret` bindings)
+
+**Startup mechanism:**
+A shell profile script (`/etc/profile.d/dbus-keyring.sh`) is installed that:
+1. Starts a D-Bus session bus via `dbus-launch` (if not already running)
+2. Exports `DBUS_SESSION_BUS_ADDRESS`
+3. Unlocks `gnome-keyring-daemon` with an empty password via stdin pipe
+
+```sh
+#!/bin/sh
+# /etc/profile.d/dbus-keyring.sh — start D-Bus + gnome-keyring for headless SSH sessions
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    eval $(dbus-launch --sh-syntax)
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+# Unlock the default keyring with an empty password
+echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null
+```
+
+This script runs on every SSH login (interactive shells source `/etc/profile.d/*.sh`). The keyring is per-session and uses an empty password, which is acceptable because the container is single-user and access is already gated by SSH key authentication.
+
+**Validates: CC-7**
+
+---
 
 ### Base Image User Inspection
 
@@ -663,3 +699,123 @@ The `TestAFindConflictingUserPullsImageIfAbsent` test (in `internal/docker`) is 
 | `--stop-and-remove`, container not found | Docker inspect | Informational message → stdout, exit 0 |
 | Container already running | Docker inspect before create | Session summary → stdout, exit 0 |
 | `--purge` user declines confirmation | Confirmation prompt | Exit 0, nothing deleted |
+
+---
+
+## Semantic Refactoring (Req 22–27)
+
+Internal code quality improvements: consolidate duplicated helpers, fix misplaced responsibilities, clarify intent. No user-facing behaviour changes.
+
+---
+
+### PathUtil Package (Req 22)
+
+New package `internal/pathutil` with zero internal dependencies (only stdlib):
+
+```go
+package pathutil
+
+import (
+    "os"
+    "path/filepath"
+)
+
+// ExpandHome expands a leading "~/" to the user's home directory.
+func ExpandHome(p string) string {
+    if len(p) >= 2 && p[:2] == "~/" {
+        home, _ := os.UserHomeDir()
+        return filepath.Join(home, p[2:])
+    }
+    return p
+}
+```
+
+All packages that currently define their own `expandHome` (`naming`, `ssh`, `credentials`, `datadir`, `cmd`) remove the local copy and import `pathutil.ExpandHome`. Tests in `cmd_test` that reference `cmd.ExpandHome` switch to `pathutil.ExpandHome`.
+
+**Validates: Req 22**
+
+---
+
+### ExecInContainer Client Parameter (Req 23)
+
+The `Agent.HealthCheck` interface and `docker.ExecInContainer` function both gain a `*docker.Client` parameter:
+
+```go
+// Agent interface change:
+HealthCheck(ctx context.Context, c *docker.Client, containerID string) error
+
+// ExecInContainer signature change:
+func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []string) (int, error)
+```
+
+Call chain: `cmd/root.go` (has `dockerClient`) → `agent.HealthCheck(ctx, dockerClient, containerID)` → `docker.ExecInContainer(ctx, dockerClient, containerID, cmd)`.
+
+**Validates: Req 23**
+
+---
+
+### Consolidated Flag Validation (Req 24)
+
+Replace 7 individual `cmd.Flags().Changed(...)` blocks with:
+
+```go
+if mode == ModeStop || mode == ModePurge {
+    var changed []string
+    cmd.Flags().Visit(func(f *pflag.Flag) {
+        changed = append(changed, f.Name)
+    })
+    if err := ValidateStartOnlyFlags(mode, changed); err != nil {
+        return err
+    }
+}
+```
+
+Dead code removed: private `stringSlicesEqual` and `expandHome` wrappers. Exported `StringSlicesEqual` remains.
+
+**Validates: Req 24**
+
+---
+
+### Split ListBACImages (Req 25)
+
+```go
+// ListBACImages returns images with the "bac.managed=true" label only.
+func ListBACImages(ctx context.Context, c *Client) ([]image.Summary, error)
+
+// ListBACImagesWithFallback returns labeled images, falling back to a tag-prefix
+// scan for images built before labels were introduced (pre-label compatibility).
+// This fallback can be removed once all users have rebuilt their images with --rebuild.
+func ListBACImagesWithFallback(ctx context.Context, c *Client) ([]image.Summary, error)
+```
+
+`runPurge` uses `ListBACImagesWithFallback`. Other callers use `ListBACImages`.
+
+**Validates: Req 25**
+
+---
+
+### HostBindIP Constant (Req 26)
+
+```go
+// HostBindIP is the IP address the container's SSH port is bound to on the host.
+HostBindIP = "127.0.0.1"
+```
+
+Used by `CreateContainer` (port binding) and `WaitForSSH` (TCP dial target). Decouples the bind address from `KnownHostsPatterns` which remains unchanged for known_hosts entry generation.
+
+**Validates: Req 26**
+
+---
+
+### CredentialPreparer File Split (Req 27)
+
+```
+internal/agent/
+    agent.go      # Agent interface only (6 methods)
+    preparer.go   # CredentialPreparer optional interface
+    registry.go   # Registry functions
+```
+
+Pure file reorganization. No functional change.
+
+**Validates: Req 27**

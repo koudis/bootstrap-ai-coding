@@ -124,6 +124,18 @@ func NewDockerfileBuilder(uid, gid int, publicKey, hostKeyPriv, hostKeyPub strin
 	// 8. Ensure sshd runtime dir exists
 	b.Run("mkdir -p /run/sshd")
 
+	// 9. Install D-Bus and gnome-keyring for headless credential storage (CC-7).
+	// Tools using libsecret (Claude Code, VS Code extensions) need a Secret Service
+	// provider to store and refresh OAuth tokens without a graphical desktop.
+	b.Run("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends dbus-x11 gnome-keyring libsecret-1-0 && rm -rf /var/lib/apt/lists/*")
+
+	// 10. Install profile.d script that starts D-Bus + gnome-keyring on SSH login.
+	// Uses an empty password to unlock the keyring — acceptable because the container
+	// is single-user and access is gated by SSH key authentication.
+	keyringScript := `#!/bin/sh\nif [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then\n    eval $(dbus-launch --sh-syntax)\n    export DBUS_SESSION_BUS_ADDRESS\nfi\necho \"\" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null\n`
+	b.Run(fmt.Sprintf("printf '%s' > %s && chmod +x %s",
+		keyringScript, constants.KeyringProfileScript, constants.KeyringProfileScript))
+
 	// NOTE: CMD is intentionally NOT set here. The caller (cmd/root.go) must
 	// append agent Install() steps and the manifest RUN, then call Finalize()
 	// to append the CMD as the very last instruction. This ensures all RUN

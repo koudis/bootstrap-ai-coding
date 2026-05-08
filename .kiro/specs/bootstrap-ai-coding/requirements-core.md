@@ -41,6 +41,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **SSH_Config_Entry**: A `Host` stanza in the SSH_Config_File managed by the tool, identified by a `Host` value matching the Container name (e.g. `bac-my-project`).
 - **Image_Build_Timeout**: The maximum wall-clock duration the CLI will wait for a Container_Image build to complete before cancelling it. Defined as `constants.ImageBuildTimeout` (8 minutes). Agent installation steps (Node.js, npm packages) are legitimately slow on a cold cache, but a build that exceeds this limit is assumed to be hung and is terminated.
 - **Verbose_Mode**: The operating mode activated by the `--verbose` (`-v`) flag. When Verbose_Mode is active, all Docker build output (layer-by-layer progress, `RUN` step output, etc.) is streamed to stdout in real time during a Container_Image build. When Verbose_Mode is inactive (the default), the build runs silently and only the "Building image..." message is shown.
+- **Host_Git_Config**: The git configuration file at `~/.gitconfig` on the Host. If present, its contents are injected into the Container_Image at build time as a read-only file at `<Container_User_Home>/.gitconfig`. This provides the Container_User with the Host_User's git identity and preferences (author name, email, aliases, etc.) without requiring manual configuration inside the Container.
 
 ---
 
@@ -402,3 +403,18 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 2. WHEN a user runs the `hostname` command inside the Container, THE output SHALL be the Container_Name.
 3. THE Container hostname SHALL be set via the Docker SDK `Hostname` field in the container configuration passed to `ContainerCreate`.
 4. THE CLI SHALL NOT override the default bash PS1 behaviour — the default Ubuntu shell prompt configuration (which includes `\h`) SHALL be sufficient to display the Container_Name in the prompt.
+
+---
+
+### Requirement 24: Git Configuration Forwarding
+
+**User Story:** As a developer, I want my host `~/.gitconfig` to be available inside the container, so that git operations (commits, pushes, rebases) use my identity and preferences without manual setup inside the container.
+
+#### Acceptance Criteria
+
+1. WHEN a Container_Image is built, THE DockerfileBuilder SHALL read the Host_User's `~/.gitconfig` file (resolved via `hostinfo.Info.HomeDir`) and inject its contents into the Container_Image at `<Container_User_Home>/.gitconfig`.
+2. THE injected `.gitconfig` file inside the Container_Image SHALL be owned by the Container_User.
+3. THE injected `.gitconfig` file inside the Container_Image SHALL have permissions `0444` (read-only for all; the Container_User SHALL NOT be able to write to it).
+4. IF the Host_User's `~/.gitconfig` file does not exist on the Host at build time, THE DockerfileBuilder SHALL skip the git configuration injection silently (no error, no warning, no output).
+5. WHEN `--rebuild` is used, THE DockerfileBuilder SHALL re-read the current Host_User's `~/.gitconfig` and inject the latest version into the rebuilt Container_Image.
+6. THE injection mechanism SHALL use base64 encoding within a `RUN` instruction (not `COPY`) so that the Dockerfile remains self-contained — no external build context files are required. This keeps the builder's output a single string, consistent with how SSH host keys and the keyring script are injected.

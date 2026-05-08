@@ -35,6 +35,7 @@ func newTestBuilder() *docker.DockerfileBuilder {
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
+		"",
 	)
 }
 

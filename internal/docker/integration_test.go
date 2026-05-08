@@ -98,6 +98,7 @@ func buildSharedImage(t *testing.T) {
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
 		strategy, conflictingUser,
+		"",
 	)
 	builder.Finalize()
 
@@ -380,6 +381,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			userPubKey,
 			hostKeyPriv, hostKeyPub,
 			strategy, conflictingUser,
+			"",
 		)
 		builder.Finalize()
 		spec := docker.ContainerSpec{

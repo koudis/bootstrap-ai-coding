@@ -1,6 +1,7 @@
 package docker_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,6 +43,7 @@ func newCreateBuilder(uid, gid int) *docker.DockerfileBuilder {
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
+		"",
 	)
 }
 
@@ -53,6 +55,7 @@ func newRenameBuilder(uid, gid int, conflictingUser string) *docker.DockerfileBu
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyRename, conflictingUser,
+		"",
 	)
 }
 
@@ -392,6 +395,7 @@ func TestPropertyPublicKeyInjected_Create(t *testing.T) {
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyCreate, "",
+			"",
 		)
 		content := b.Build()
 
@@ -415,6 +419,7 @@ func TestPropertyPublicKeyInjected_Rename(t *testing.T) {
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyRename, conflictingUser,
+			"",
 		)
 		content := b.Build()
 
@@ -443,6 +448,7 @@ func TestPropertySSHHostKeyInjected_Create(t *testing.T) {
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
 			docker.UserStrategyCreate, "",
+			"",
 		)
 		content := b.Build()
 
@@ -472,6 +478,7 @@ func TestPropertySSHHostKeyInjected_Rename(t *testing.T) {
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
 			docker.UserStrategyRename, conflictingUser,
+			"",
 		)
 		content := b.Build()
 
@@ -856,6 +863,7 @@ func TestPropertyDockerfileSSHAndUserForAnyUsername(t *testing.T) {
 			fixedPublicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyCreate, "",
+			"",
 		)
 		b.Finalize()
 		content := b.Build()
@@ -910,6 +918,7 @@ func TestPropertyDockerfileUsesRuntimeUsernameAndHomeDir(t *testing.T) {
 			fixedPublicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyCreate, "",
+			"",
 		)
 		content := b.Build()
 
@@ -955,4 +964,115 @@ func TestPropertyDockerfileUsesRuntimeUsernameAndHomeDir(t *testing.T) {
 				"Dockerfile must not contain hardcoded '/home/dev' when homeDir is %q", homeDir)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for git config injection (Req 24)
+// ---------------------------------------------------------------------------
+
+// TestGitConfigInjection_SpecialCharacters verifies that git config content
+// containing special characters (double quotes, single quotes, backslashes,
+// dollar signs, backticks, newlines) is correctly handled via base64 encoding
+// in the generated Dockerfile.
+// Validates: Req 24
+func TestGitConfigInjection_SpecialCharacters(t *testing.T) {
+	// Content with characters that would break shell escaping if not base64-encoded.
+	gitConfigContent := "[alias]\n\tci = commit -m \"WIP\"\n\tco = checkout\n[user]\n\tname = O'Brien\n\temail = user@example.com\n[core]\n\tpath = ~/path with spaces/$HOME/`echo hi`\\\n"
+	expectedBase64 := base64.StdEncoding.EncodeToString([]byte(gitConfigContent))
+
+	info := &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      1000,
+		GID:      1000,
+	}
+
+	b := docker.NewDockerfileBuilder(
+		info,
+		fixedPublicKey,
+		fixedHostKeyPriv, fixedHostKeyPub,
+		docker.UserStrategyCreate, "",
+		gitConfigContent,
+	)
+	content := b.Build()
+
+	// The RUN line must contain the correct base64-encoded version of the special content.
+	require.Contains(t, content, fmt.Sprintf("echo %s | base64 -d > /home/testuser/.gitconfig", expectedBase64),
+		"Dockerfile must contain base64-encoded git config with special characters")
+
+	// Decode the base64 from the generated Dockerfile and verify it matches the original content.
+	decoded, err := base64.StdEncoding.DecodeString(expectedBase64)
+	require.NoError(t, err, "base64 decoding must succeed")
+	require.Equal(t, gitConfigContent, string(decoded),
+		"decoded base64 must match the original git config content with special characters")
+
+	// Verify chown and chmod are present.
+	require.Contains(t, content, "chown testuser:testuser /home/testuser/.gitconfig",
+		"Dockerfile must contain chown for .gitconfig")
+	require.Contains(t, content, "chmod 0444 /home/testuser/.gitconfig",
+		"Dockerfile must contain chmod 0444 for .gitconfig")
+}
+
+// TestGitConfigInjection_NonEmpty verifies that when non-empty git config
+// content is passed to NewDockerfileBuilder, the generated Dockerfile contains
+// a RUN line that pipes base64-encoded content to <homeDir>/.gitconfig with
+// correct chown and chmod 0444.
+// Validates: Req 24
+func TestGitConfigInjection_NonEmpty(t *testing.T) {
+	gitConfigContent := "[user]\n\tname = Test User\n\temail = test@example.com\n"
+	expectedBase64 := base64.StdEncoding.EncodeToString([]byte(gitConfigContent))
+
+	info := &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      1000,
+		GID:      1000,
+	}
+
+	b := docker.NewDockerfileBuilder(
+		info,
+		fixedPublicKey,
+		fixedHostKeyPriv, fixedHostKeyPub,
+		docker.UserStrategyCreate, "",
+		gitConfigContent,
+	)
+	content := b.Build()
+
+	// The RUN line must pipe base64-encoded content through base64 -d to write to <homeDir>/.gitconfig
+	require.Contains(t, content, fmt.Sprintf("echo %s | base64 -d > /home/testuser/.gitconfig", expectedBase64),
+		"Dockerfile must contain base64 decode pipeline writing to /home/testuser/.gitconfig")
+
+	// The RUN line must contain chown <username>:<username> <homeDir>/.gitconfig
+	require.Contains(t, content, "chown testuser:testuser /home/testuser/.gitconfig",
+		"Dockerfile must contain chown testuser:testuser /home/testuser/.gitconfig")
+
+	// The RUN line must contain chmod 0444 <homeDir>/.gitconfig
+	require.Contains(t, content, "chmod 0444 /home/testuser/.gitconfig",
+		"Dockerfile must contain chmod 0444 /home/testuser/.gitconfig")
+}
+
+// TestGitConfigInjection_Empty verifies that when an empty string is passed
+// for the gitConfig parameter, the generated Dockerfile does NOT contain any
+// .gitconfig-related RUN line.
+// Validates: Req 24
+func TestGitConfigInjection_Empty(t *testing.T) {
+	info := &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      1000,
+		GID:      1000,
+	}
+
+	b := docker.NewDockerfileBuilder(
+		info,
+		fixedPublicKey,
+		fixedHostKeyPriv, fixedHostKeyPub,
+		docker.UserStrategyCreate, "",
+		"",
+	)
+	content := b.Build()
+
+	// No .gitconfig injection should appear when gitConfig is empty
+	require.NotContains(t, content, ".gitconfig",
+		"Dockerfile must NOT contain .gitconfig when gitConfig parameter is empty")
 }

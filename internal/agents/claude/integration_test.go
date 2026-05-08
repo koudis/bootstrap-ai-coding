@@ -104,6 +104,7 @@ func setupSharedContainer() error {
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
 		strategy, conflictingUser,
+		"",
 	)
 
 	claudeAgent, err := agent.Lookup(constants.ClaudeCodeAgentName)

@@ -3,6 +3,7 @@
 package docker
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -29,6 +30,7 @@ type DockerfileBuilder struct {
 	info          *hostinfo.Info
 	lines         []string
 	nodeInstalled bool
+	gitConfig     string
 }
 
 // Username returns the host user's username from the Info struct.
@@ -75,8 +77,8 @@ func (b *DockerfileBuilder) IsNodeInstalled() bool {
 // or an existing conflicting user is renamed (UserStrategyRename).
 // conflictingUser is the name of the existing user to rename; it is ignored
 // when strategy == UserStrategyCreate.
-func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string, strategy UserStrategy, conflictingUser string) *DockerfileBuilder {
-	b := &DockerfileBuilder{info: info}
+func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string, strategy UserStrategy, conflictingUser string, gitConfig string) *DockerfileBuilder {
+	b := &DockerfileBuilder{info: info, gitConfig: gitConfig}
 
 	// 1. Base image
 	b.From(constants.BaseContainerImage)
@@ -147,6 +149,22 @@ func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPu
 	keyringScript := `#!/bin/sh\nif [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then\n    eval $(dbus-launch --sh-syntax)\n    export DBUS_SESSION_BUS_ADDRESS\nfi\necho \"\" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null\n`
 	b.Run(fmt.Sprintf("printf '%s' > %s && chmod +x %s",
 		keyringScript, constants.KeyringProfileScript, constants.KeyringProfileScript))
+
+	// 11. Inject host user's ~/.gitconfig into the container (Req 24).
+	// Uses base64 encoding via a RUN instruction (not COPY) so the Dockerfile remains
+	// self-contained — no external build context files required. Base64 also avoids
+	// shell escaping issues with arbitrary git config content (quotes, newlines, etc.).
+	// Skipped entirely if no git config was provided (file absent on host).
+	if b.gitConfig != "" {
+		encoded := base64.StdEncoding.EncodeToString([]byte(b.gitConfig))
+		gitConfigPath := fmt.Sprintf("%s/.gitconfig", info.HomeDir)
+		b.Run(fmt.Sprintf(
+			"echo %s | base64 -d > %s && chown %s:%s %s && chmod %04o %s",
+			encoded, gitConfigPath,
+			info.Username, info.Username, gitConfigPath,
+			constants.GitConfigPerm, gitConfigPath,
+		))
+	}
 
 	// NOTE: CMD is intentionally NOT set here. The caller (cmd/root.go) must
 	// append agent Install() steps and the manifest RUN, then call Finalize()

@@ -533,7 +533,12 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			}
 		}
 
-		b := dockerpkg.NewDockerfileBuilder(info, publicKey, hostKeyPriv, hostKeyPub, strategy, conflictingUser)
+		gitConfigContent := ""
+		if data, err := os.ReadFile(filepath.Join(info.HomeDir, ".gitconfig")); err == nil {
+			gitConfigContent = string(data)
+		}
+
+		b := dockerpkg.NewDockerfileBuilder(info, publicKey, hostKeyPriv, hostKeyPub, strategy, conflictingUser, gitConfigContent)
 		for _, a := range enabledAgents {
 			a.Install(b)
 		}

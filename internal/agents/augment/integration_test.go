@@ -104,6 +104,7 @@ func setupSharedContainer() error {
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
 		strategy, conflictingUser,
+		"",
 	)
 
 	augmentAgent, err := agent.Lookup(constants.AugmentCodeAgentName)

@@ -229,6 +229,7 @@ const (
     KnownHostsFile              = "~/.ssh/known_hosts"
     SSHConfigFile               = "~/.ssh/config"
     ImageBuildTimeout           = 8 * time.Minute  // Image_Build_Timeout glossary term
+    GitConfigPerm               = 0o444            // Host_Git_Config permissions inside container (Req 24)
 )
 ```
 
@@ -395,6 +396,7 @@ RUN sshd_config hardening                   ← stable, cached
 RUN mkdir /run/sshd                         ← stable, cached
 RUN apt-get install dbus-x11 gnome-keyring libsecret-1-0  ← keyring (CC-7), cached
 RUN install /etc/profile.d/dbus-keyring.sh  ← keyring startup script, cached
+RUN printf gitconfig > <homeDir>/.gitconfig ← git config (Req 24), base64-encoded RUN (not COPY — keeps Dockerfile self-contained); skipped if absent on host
 RUN apt-get install curl ca-certificates    ← agent step, cached after first build
 RUN nodesource setup + nodejs               ← agent step, cached after first build
 RUN npm install -g @augmentcode/auggie      ← agent step, cached after first build
@@ -433,6 +435,56 @@ echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null
 This script runs on every SSH login (interactive shells source `/etc/profile.d/*.sh`). The keyring is per-session and uses an empty password, which is acceptable because the container is single-user and access is already gated by SSH key authentication.
 
 **Validates: CC-7**
+
+---
+
+### Git Configuration Forwarding (Req 24)
+
+The `DockerfileBuilder` injects the host user's `~/.gitconfig` into the container image at build time, following the same pattern as SSH host key injection (step 6 in the constructor). The git config content is read by the caller (`cmd/root.go`) and passed to the builder as an optional string parameter.
+
+**Constructor change:**
+
+```go
+// NewDockerfileBuilder gains an additional parameter:
+func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string,
+    strategy UserStrategy, conflictingUser string, gitConfig string) *DockerfileBuilder
+```
+
+The `gitConfig` parameter contains the full text content of `~/.gitconfig`. If the file does not exist on the host, the caller passes an empty string and the builder skips the injection step entirely (no Dockerfile instruction emitted).
+
+**Caller logic in `cmd/root.go`:**
+
+```go
+// Read git config — silent skip if absent
+gitConfigPath := filepath.Join(info.HomeDir, ".gitconfig")
+gitConfigContent, err := os.ReadFile(gitConfigPath)
+if err != nil {
+    gitConfigContent = nil // file absent or unreadable — skip silently
+}
+
+b := dockerpkg.NewDockerfileBuilder(info, publicKey, hostKeyPriv, hostKeyPub,
+    strategy, conflictingUser, string(gitConfigContent))
+```
+
+**Generated Dockerfile step** (only emitted when `gitConfig != ""`):
+
+```dockerfile
+RUN echo <base64-encoded-content> | base64 -d > /home/alice/.gitconfig && \
+    chown alice:alice /home/alice/.gitconfig && \
+    chmod 0444 /home/alice/.gitconfig
+```
+
+**Injection placement in the constructor:** After the keyring setup (step 10) and before the `// NOTE: CMD is intentionally NOT set here` comment. This places it in the stable base layer — the git config rarely changes, so it benefits from Docker layer caching.
+
+**Design decisions:**
+
+- **Content injection, not bind-mount:** The file is baked into the image (like SSH host keys) rather than bind-mounted at runtime. This ensures the config is available even if the host file is later deleted, and avoids adding another mount to the container spec.
+- **Base64 encoding over `COPY` or raw `printf`:** Using `COPY` would require the git config to exist as a file in the Docker build context (a tar archive), which would mean the builder can no longer produce a self-contained Dockerfile string — it would need to manage build context files too. Base64 avoids all shell escaping issues (quotes, newlines, backslashes, dollar signs, backticks) that raw `printf` or `echo` would face with arbitrary git config content. This is the same pattern used for SSH host key injection.
+- **Read-only (`0444`):** The container user cannot modify the injected config. If they need local overrides, they can use `git config --local` or `GIT_CONFIG_GLOBAL` env var. This prevents accidental writes that would be lost on rebuild.
+- **Silent skip:** If `~/.gitconfig` is absent, no error or warning is produced — many developers may not have a global git config (they use per-repo `.git/config` instead).
+- **Re-read on `--rebuild`:** Since `--rebuild` forces `NoCache`, the `os.ReadFile` in `cmd/root.go` always reads the current file content. No special logic is needed — the standard rebuild path handles this automatically.
+
+**Validates: Req 24.1, 24.2, 24.3, 24.4, 24.5**
 
 ---
 

@@ -73,6 +73,10 @@ const (
 	// Satisfies Req 15.3.
 	ToolDataFilePerm = 0o600
 
+	// GitConfigPerm is the file permission for the injected .gitconfig inside the container.
+	// Read-only for all users. Satisfies Req 24.
+	GitConfigPerm = 0o444
+
 	// KnownHostsFile is the path to the SSH client's known_hosts file on the Host.
 	// Corresponds to the Known_Hosts_File glossary term.
 	// The "~/" prefix is expanded at runtime via os.UserHomeDir().

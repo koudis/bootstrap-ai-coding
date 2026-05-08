@@ -558,6 +558,34 @@ func TestSSHConfigEntryLifecycle(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// 16.12 TestContainerHostnameMatchesContainerName
+// Validates: Req 23.1, 23.2
+// ----------------------------------------------------------------------------
+
+func TestContainerHostnameMatchesContainerName(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	containerName, _, client, cleanup := startContainerFromSharedImage(t)
+	t.Cleanup(cleanup)
+
+	ctx := context.Background()
+
+	// Verify via container inspect that the hostname is set correctly.
+	info, err := docker.InspectContainer(ctx, client, containerName)
+	require.NoError(t, err, "inspecting container")
+	require.NotNil(t, info, "container should exist")
+	require.Equal(t, containerName, info.Config.Hostname,
+		"container hostname should match container name")
+
+	// Also verify by running `hostname` inside the container.
+	exitCode, err := docker.ExecInContainer(ctx, client, containerName, []string{"hostname"})
+	require.NoError(t, err, "exec hostname command")
+	require.Equal(t, 0, exitCode, "hostname command should exit 0")
+}
+
+// ----------------------------------------------------------------------------
 // Internal helpers
 // ----------------------------------------------------------------------------
 

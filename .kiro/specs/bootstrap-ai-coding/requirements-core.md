@@ -389,3 +389,16 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 3. THE Container_User username and Container_User_Home SHALL be determined before any Docker or SSH operations begin and used consistently across all operations (Dockerfile generation, credential mount paths, SSH config entries).
 4. THE CLI SHALL only support Linux hosts. No macOS home directory path translation is required.
 
+
+---
+
+### Requirement 23: Container Hostname Matches Container Name
+
+**User Story:** As a developer, I want the hostname inside the container to match the container name, so that my shell prompt shows which project session I am in when I SSH into the container.
+
+#### Acceptance Criteria
+
+1. WHEN a Container is created, THE CLI SHALL set the Container's hostname to the Container_Name.
+2. WHEN a user runs the `hostname` command inside the Container, THE output SHALL be the Container_Name.
+3. THE Container hostname SHALL be set via the Docker SDK `Hostname` field in the container configuration passed to `ContainerCreate`.
+4. THE CLI SHALL NOT override the default bash PS1 behaviour — the default Ubuntu shell prompt configuration (which includes `\h`) SHALL be sufficient to display the Container_Name in the prompt.

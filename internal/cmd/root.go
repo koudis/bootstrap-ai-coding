@@ -456,6 +456,15 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 
 	for _, a := range enabledAgents {
 		resolved := datadir.ResolveCredentialPath(a.CredentialStorePath(), "")
+		if resolved == "" {
+			// Agent has no credential store (e.g. build-resources) — skip.
+			agentStatuses = append(agentStatuses, agentCredStatus{
+				a:              a,
+				resolvedPath:   "",
+				hasCredentials: true,
+			})
+			continue
+		}
 		if err := datadir.EnsureCredentialDir(resolved); err != nil {
 			return fmt.Errorf("ensuring credential dir for %s: %w", a.ID(), err)
 		}
@@ -597,9 +606,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		{HostPath: absPath, ContainerPath: constants.WorkspaceMountPath},
 	}
 	for _, s := range agentStatuses {
+		containerPath := s.a.ContainerMountPath(info.HomeDir)
+		if s.resolvedPath == "" || containerPath == "" {
+			continue // Agent has no credential store (e.g. build-resources)
+		}
 		mounts = append(mounts, dockerpkg.Mount{
 			HostPath:      s.resolvedPath,
-			ContainerPath: s.a.ContainerMountPath(info.HomeDir),
+			ContainerPath: containerPath,
 		})
 	}
 

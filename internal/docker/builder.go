@@ -208,6 +208,15 @@ func (b *DockerfileBuilder) Cmd(cmd string) {
 	b.lines = append(b.lines, fmt.Sprintf(`CMD ["/bin/sh", "-c", %q]`, cmd))
 }
 
+// RunAsUser emits a USER switch, runs the command as the container user,
+// then switches back to root for subsequent instructions. This is used by
+// agent modules that need to install user-local tools (e.g. uv).
+func (b *DockerfileBuilder) RunAsUser(cmd string) {
+	b.lines = append(b.lines, fmt.Sprintf("USER %s", b.info.Username))
+	b.lines = append(b.lines, "RUN "+cmd)
+	b.lines = append(b.lines, "USER root")
+}
+
 // Build returns the complete Dockerfile content as a string,
 // with each instruction on its own line and a trailing newline.
 func (b *DockerfileBuilder) Build() string {

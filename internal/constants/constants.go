@@ -50,10 +50,15 @@ const (
 	// Corresponds to the Agent_ID glossary term for Augment Code (AC-1).
 	AugmentCodeAgentName = "augment-code"
 
+	// BuildResourcesAgentName is the stable Agent_ID for the Build Resources
+	// pseudo-agent module that installs common build toolchains and runtimes.
+	// Corresponds to the Agent_ID glossary term for Build Resources (BR-1).
+	BuildResourcesAgentName = "build-resources"
+
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
-	// --agents flag is omitted. Both Claude Code and Augment Code are enabled
-	// by default.
-	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName
+	// --agents flag is omitted. Claude Code, Augment Code, and Build Resources
+	// are enabled by default.
+	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName + "," + BuildResourcesAgentName
 
 	// SSHHostKeyType is the algorithm used for the container's SSH host key pair.
 	// Determines the key file names on disk (ssh_host_<type>_key) and the path

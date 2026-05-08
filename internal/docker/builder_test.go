@@ -1076,3 +1076,54 @@ func TestGitConfigInjection_Empty(t *testing.T) {
 	require.NotContains(t, content, ".gitconfig",
 		"Dockerfile must NOT contain .gitconfig when gitConfig parameter is empty")
 }
+
+// ---------------------------------------------------------------------------
+// RunAsUser tests
+// ---------------------------------------------------------------------------
+
+// TestRunAsUserEmitsCorrectSequence verifies that RunAsUser emits
+// USER <username>, RUN <cmd>, USER root in the correct order.
+func TestRunAsUserEmitsCorrectSequence(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	linesBefore := len(b.Lines())
+
+	b.RunAsUser("curl -LsSf https://astral.sh/uv/install.sh | sh")
+
+	lines := b.Lines()
+	require.Equal(t, linesBefore+3, len(lines),
+		"RunAsUser must append exactly 3 lines")
+
+	require.Equal(t, "USER testuser", lines[linesBefore],
+		"first line must be USER <username>")
+	require.Equal(t, "RUN curl -LsSf https://astral.sh/uv/install.sh | sh", lines[linesBefore+1],
+		"second line must be RUN <cmd>")
+	require.Equal(t, "USER root", lines[linesBefore+2],
+		"third line must be USER root")
+}
+
+// TestRunAsUserUsesInfoUsername verifies that RunAsUser uses the username
+// from the builder's hostinfo.Info, not a hardcoded value.
+func TestRunAsUserUsesInfoUsername(t *testing.T) {
+	info := &hostinfo.Info{
+		Username: "alice",
+		HomeDir:  "/home/alice",
+		UID:      1001,
+		GID:      1001,
+	}
+	b := docker.NewDockerfileBuilder(
+		info,
+		fixedPublicKey,
+		fixedHostKeyPriv, fixedHostKeyPub,
+		docker.UserStrategyCreate, "",
+		"",
+	)
+	linesBefore := len(b.Lines())
+
+	b.RunAsUser("echo hello")
+
+	lines := b.Lines()
+	require.Equal(t, "USER alice", lines[linesBefore],
+		"RunAsUser must use the username from hostinfo.Info")
+	require.Equal(t, "USER root", lines[linesBefore+2],
+		"RunAsUser must switch back to root")
+}

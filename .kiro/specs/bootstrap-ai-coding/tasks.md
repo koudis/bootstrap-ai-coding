@@ -1,58 +1,111 @@
-# Tasks — Module Consolidation (Req 28)
+# Tasks: Build Resources Agent
 
-Merge `internal/credentials` and `internal/portfinder` into `internal/datadir`.
+## Task 1: Add `RunAsUser` method to DockerfileBuilder
 
-## 1. Merge credentials into datadir
+- [x] Add `RunAsUser(cmd string)` method to `internal/docker/builder.go`
+  - [x] Emit `USER <username>` (from `b.info.Username`)
+  - [x] Emit `RUN <cmd>`
+  - [x] Emit `USER root` to restore root context for subsequent instructions
+- [x] Add unit test in `internal/docker/builder_test.go` verifying `RunAsUser` emits correct USER/RUN/USER sequence
 
-- [x] 1.1 Create `internal/datadir/credentials.go` with `ResolveCredentialPath` and `EnsureCredentialDir` functions (same logic as `credentials.Resolve` and `credentials.EnsureDir`)
-- [x] 1.2 Create `internal/datadir/credentials_test.go` — move all tests from `internal/credentials/store_test.go`, updating import paths from `credentials` to `datadir`
-- [x] 1.3 Update `internal/cmd/root.go` — replace `credentials.Resolve` with `datadir.ResolveCredentialPath` and `credentials.EnsureDir` with `datadir.EnsureCredentialDir`; remove the `credentials` import
-- [x] 1.4 Delete `internal/credentials/store.go` and `internal/credentials/store_test.go`
-- [x] 1.5 Verify build passes: `go build ./...`
-
-## 2. Merge portfinder into datadir
-
-- [x] 2.1 Create `internal/datadir/portfinder.go` with `FindFreePort` and `IsPortFree` functions (same logic as `portfinder.FindFreePort` and `portfinder.IsPortFree`)
-- [x] 2.2 Create `internal/datadir/portfinder_test.go` — move all tests from `internal/portfinder/portfinder_test.go`, updating import paths from `portfinder` to `datadir`
-- [x] 2.3 Update `internal/cmd/root.go` — replace `portfinder.FindFreePort` with `datadir.FindFreePort` and `portfinder.IsPortFree` with `datadir.IsPortFree`; remove the `portfinder` import
-- [x] 2.4 Delete `internal/portfinder/portfinder.go` and `internal/portfinder/portfinder_test.go`
-- [x] 2.5 Verify build passes: `go build ./...`
-
-## 3. Run full test suite
-
-- [x] 3.1 Run `go test ./...` and confirm all unit and property-based tests pass
-- [x] 3.2 Run `go vet ./...` and confirm no issues
+**File:** `internal/docker/builder.go`, `internal/docker/builder_test.go`
+**Validates:** Design section "DockerfileBuilder Extension: RunAsUser"
 
 ---
 
-# Tasks — Git Configuration Forwarding (Req 24)
+## Task 2: Implement the `buildresources` agent package
 
-Inject the host user's `~/.gitconfig` into the container image at build time as a read-only file.
+- [x] Create `internal/agents/buildresources/buildresources.go`
+  - [x] Define `buildResourcesAgent` struct
+  - [x] Implement `init()` calling `agent.Register(&buildResourcesAgent{})`
+  - [x] Implement `ID()` returning `constants.BuildResourcesAgentName`
+  - [x] Implement `Install(b *docker.DockerfileBuilder)`:
+    - [x] Define local `aptPackages []string` slice listing all apt packages (grouped by category: Python, C/C++, Java, common deps, utilities)
+    - [x] Single `apt-get install` using `strings.Join(aptPackages, " ")`
+    - [x] Go tarball download and extraction to `/usr/local/go` (architecture-aware via `dpkg --print-architecture`)
+    - [x] `/etc/profile.d/golang.sh` for system-wide Go PATH
+    - [x] `b.RunAsUser(...)` for uv installation via official installer
+    - [x] `b.RunAsUser(...)` for `~/.bashrc` PATH entry (`$HOME/.local/bin`)
+  - [x] Implement `CredentialStorePath()` returning `""`
+  - [x] Implement `ContainerMountPath(homeDir string)` returning `""`
+  - [x] Implement `HasCredentials(storePath string)` returning `(true, nil)`
+  - [x] Implement `HealthCheck(ctx, c, containerID)` checking: `python3 --version`, `bash -lc "uv --version"`, `cmake --version`, `javac -version`, `bash -lc "go version"`
 
-## 4. Add GitConfigPerm constant
+**File:** `internal/agents/buildresources/buildresources.go`
+**Validates:** BR-1, BR-2, BR-3, BR-4, BR-5
 
-- [x] 4.1 Add `GitConfigPerm = 0o444` to `internal/constants/constants.go` with a comment referencing Req 24
-- [x] 4.2 Verify build passes: `go build ./...`
+**Depends on:** Task 1
 
-## 5. Update DockerfileBuilder to accept and inject git config
+---
 
-- [x] 5.1 Add `gitConfig string` parameter to `NewDockerfileBuilder` in `internal/docker/builder.go`
-- [x] 5.2 After the keyring setup step (step 10), add conditional logic: if `gitConfig != ""`, emit a `RUN` step that writes the content to `<info.HomeDir>/.gitconfig`, sets ownership to `info.Username:info.Username`, and sets permissions to `constants.GitConfigPerm` (`0444`)
-- [x] 5.3 Update all existing callers of `NewDockerfileBuilder` to pass the new `gitConfig` parameter (empty string `""` for test helpers and integration tests that don't need git config)
+## Task 3: Wire `buildresources` into `main.go`
 
-## 6. Update cmd/root.go to read and pass git config
+- [x] Add blank import `_ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"` to `main.go`
 
-- [x] 6.1 In the image build section of `cmd/root.go`, before calling `NewDockerfileBuilder`, read `filepath.Join(info.HomeDir, ".gitconfig")` using `os.ReadFile`; if the file does not exist or is unreadable, set content to empty string (no error, no warning)
-- [x] 6.2 Pass the git config content string to `NewDockerfileBuilder` as the new `gitConfig` parameter
+**File:** `main.go`
+**Validates:** BR-5, BR-6
 
-## 7. Unit tests for git config injection
+**Depends on:** Task 2
 
-- [x] 7.1 In `internal/docker/builder_test.go`, add a test that passes non-empty git config content and asserts the generated Dockerfile contains a `RUN` line that writes to `<homeDir>/.gitconfig` with `chmod 0444` and correct `chown`
-- [x] 7.2 In `internal/docker/builder_test.go`, add a test that passes empty string for git config and asserts no `.gitconfig`-related `RUN` line appears in the generated Dockerfile
-- [x] 7.3 In `internal/docker/builder_test.go`, add a test that verifies git config content with special characters (quotes, newlines, backslashes) is correctly escaped in the generated Dockerfile step
+---
 
-## 8. Verify full build and test suite
+## Task 4: Unit tests for `buildresources` agent
 
-- [x] 8.1 Run `go build ./...` and confirm no compilation errors
-- [x] 8.2 Run `go test ./...` and confirm all unit and property-based tests pass
-- [x] 8.3 Run `go vet ./...` and confirm no issues
+- [x] Create `internal/agents/buildresources/buildresources_test.go`
+  - [x] Test `ID()` returns `"build-resources"`
+  - [x] Test `CredentialStorePath()` returns `""`
+  - [x] Test `ContainerMountPath("")` returns `""`
+  - [x] Test `HasCredentials("")` returns `(true, nil)`
+  - [x] Test `Install()` appends expected RUN lines (python3, cmake, build-essential, default-jdk, go tarball, uv)
+  - [x] Test `Install()` uses `RunAsUser` for uv steps (verify USER directives in output)
+
+**File:** `internal/agents/buildresources/buildresources_test.go`
+**Validates:** BR-1, BR-2, BR-3
+
+**Depends on:** Task 2
+
+---
+
+## Task 5: Update existing tests that depend on `DefaultAgents`
+
+- [x] Check `internal/cmd/root_test.go` for tests that assert on default agent list — update expected values to include `"build-resources"`
+- [x] Check `internal/agent/registry_test.go` for any hardcoded agent count assertions — update if needed
+- [x] Run `go test ./...` and fix any failures caused by the new default agent
+
+**File:** `internal/cmd/root_test.go`, `internal/agent/registry_test.go`
+**Validates:** BR-6
+
+**Depends on:** Task 3
+
+---
+
+## Task 6: Integration test for `buildresources` agent
+
+- [x] Create `internal/agents/buildresources/integration_test.go`
+  - [x] Gate with `//go:build integration`
+  - [x] Add `TestMain` with consent gate and `EnsureBaseImageAbsent()`
+  - [x] Test that container built with `build-resources` has all tools available:
+    - [x] `python3 --version` exits 0
+    - [x] `bash -lc "uv --version"` exits 0 (as Container_User)
+    - [x] `cmake --version` exits 0
+    - [x] `javac -version` exits 0
+    - [x] `bash -lc "go version"` exits 0
+  - [x] Clean up container in `t.Cleanup()`
+
+**File:** `internal/agents/buildresources/integration_test.go`
+**Validates:** BR-2, BR-4
+
+**Depends on:** Task 3
+
+---
+
+## Task Dependency Graph
+
+```
+Task 1 (RunAsUser)
+    └── Task 2 (buildresources package)
+            ├── Task 3 (wire main.go)
+            │       ├── Task 5 (update existing tests)
+            │       └── Task 6 (integration test)
+            └── Task 4 (unit tests)
+```

@@ -174,6 +174,7 @@ func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string
 		ctx,
 		&container.Config{
 			Image:        spec.ImageTag,
+			Hostname:     spec.Name,
 			Labels:       spec.Labels,
 			ExposedPorts: exposedPorts,
 		},

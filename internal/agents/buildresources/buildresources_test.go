@@ -56,11 +56,8 @@ func TestHasCredentials(t *testing.T) {
 func TestInstallAppendsExpectedPackages(t *testing.T) {
 	a := getAgent(t)
 	info := testInfo()
-	b := docker.NewDockerfileBuilder(
+	b := docker.NewBaseImageBuilder(
 		info,
-		"ssh-ed25519 AAAAC3fakekey test@host",
-		"-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----",
-		"ssh-ed25519 AAAAC3fakeHostKey host",
 		docker.UserStrategyCreate, "",
 		"",
 	)
@@ -104,11 +101,8 @@ func TestInstallAppendsExpectedPackages(t *testing.T) {
 func TestInstallUsesSystemWidePaths(t *testing.T) {
 	a := getAgent(t)
 	info := testInfo()
-	b := docker.NewDockerfileBuilder(
+	b := docker.NewBaseImageBuilder(
 		info,
-		"ssh-ed25519 AAAAC3fakekey test@host",
-		"-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----",
-		"ssh-ed25519 AAAAC3fakeHostKey host",
 		docker.UserStrategyCreate, "",
 		"",
 	)
@@ -120,11 +114,8 @@ func TestInstallUsesSystemWidePaths(t *testing.T) {
 	var userLinesFromInstall []string
 	// The base builder emits lines before Install() is called; count lines after
 	// the base builder's output
-	baseBuilder := docker.NewDockerfileBuilder(
+	baseBuilder := docker.NewBaseImageBuilder(
 		info,
-		"ssh-ed25519 AAAAC3fakekey test@host",
-		"-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----",
-		"ssh-ed25519 AAAAC3fakeHostKey host",
 		docker.UserStrategyCreate, "",
 		"",
 	)

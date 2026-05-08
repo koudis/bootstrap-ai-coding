@@ -19,7 +19,7 @@ import (
 // category for readability and easy modification.
 var aptPackages = []string{
 	// Python
-	"python3", "python3-pip", "python3-venv", "python3-dev",
+	"python3", "python3-pip", "python3-venv", "python3-dev", "python3-pytest",
 	"python3-setuptools", "python3-wheel",
 	// C/C++ build toolchain
 	"build-essential", "cmake", "pkg-config",

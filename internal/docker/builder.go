@@ -56,28 +56,27 @@ func (b *DockerfileBuilder) IsNodeInstalled() bool {
 	return b.nodeInstalled
 }
 
-// NewDockerfileBuilder returns a builder pre-seeded with the base layer required
-// for every bac container:
+// NewBaseImageBuilder returns a builder pre-seeded with the shared base layer for
+// bac-base:latest. It contains everything that is common across all projects:
 //
 //   - FROM constants.BaseContainerImage
 //   - openssh-server + sudo installation
 //   - Container_User creation or rename (controlled by strategy)
 //   - passwordless sudo for Container_User
-//   - SSH authorized_keys for Container_User
-//   - SSH host key injection from Tool_Data_Dir
-//   - sshd_config hardening (no password auth, no root login)
-//   - mkdir -p /run/sshd
-//   - CMD ["/usr/sbin/sshd", "-D"]
+//   - D-Bus + gnome-keyring + profile script
+//   - gitconfig injection (if non-empty)
 //
-// uid and gid are derived from info.UID and info.GID (the host user's effective UID/GID).
-// publicKey is the content of the user's SSH public key.
-// hostKeyPriv and hostKeyPub are the persisted SSH host key pair contents
-// (key type is always constants.SSHHostKeyType).
+// It does NOT include SSH host keys, authorized_keys, sshd_config hardening,
+// /run/sshd, or CMD — those belong in the Instance_Image (TL-2).
+//
+// info carries the runtime-resolved Container_User identity (Req 22).
 // strategy controls whether Container_User is created fresh (UserStrategyCreate)
 // or an existing conflicting user is renamed (UserStrategyRename).
 // conflictingUser is the name of the existing user to rename; it is ignored
 // when strategy == UserStrategyCreate.
-func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string, strategy UserStrategy, conflictingUser string, gitConfig string) *DockerfileBuilder {
+// gitConfig is the content of the host user's ~/.gitconfig; if empty, the
+// injection step is skipped.
+func NewBaseImageBuilder(info *hostinfo.Info, strategy UserStrategy, conflictingUser string, gitConfig string) *DockerfileBuilder {
 	b := &DockerfileBuilder{info: info, gitConfig: gitConfig}
 
 	// 1. Base image
@@ -109,52 +108,15 @@ func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPu
 		info.Username, info.Username, info.Username,
 	))
 
-	// 5. Install SSH public key for Container_User
-	// %q is used to safely quote the key content so special characters are escaped.
-	b.Run(fmt.Sprintf(
-		"mkdir -p %s/.ssh && echo %s >> %s/.ssh/authorized_keys && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys && chown -R %s:%s %s/.ssh",
-		info.HomeDir,
-		fmt.Sprintf("%q", publicKey),
-		info.HomeDir,
-		info.HomeDir,
-		info.HomeDir,
-		info.Username, info.Username,
-		info.HomeDir,
-	))
-
-	// 6. Inject persisted SSH host key pair (type: constants.SSHHostKeyType)
-	privPath := fmt.Sprintf("/etc/ssh/ssh_host_%s_key", constants.SSHHostKeyType)
-	pubPath := privPath + ".pub"
-	b.Run(fmt.Sprintf(
-		"echo %s > %s && echo %s > %s && chmod 600 %s && chmod 644 %s",
-		fmt.Sprintf("%q", hostKeyPriv), privPath,
-		fmt.Sprintf("%q", hostKeyPub), pubPath,
-		privPath, pubPath,
-	))
-
-	// 7. Harden sshd_config
-	b.Run("echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && echo 'PermitRootLogin no' >> /etc/ssh/sshd_config && echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config")
-
-	// 8. Ensure sshd runtime dir exists
-	b.Run("mkdir -p /run/sshd")
-
-	// 9. Install D-Bus and gnome-keyring for headless credential storage (CC-7).
-	// Tools using libsecret (Claude Code, VS Code extensions) need a Secret Service
-	// provider to store and refresh OAuth tokens without a graphical desktop.
+	// 5. Install D-Bus and gnome-keyring for headless credential storage (CC-7).
 	b.Run("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends dbus-x11 gnome-keyring libsecret-1-0 && rm -rf /var/lib/apt/lists/*")
 
-	// 10. Install profile.d script that starts D-Bus + gnome-keyring on SSH login.
-	// Uses an empty password to unlock the keyring — acceptable because the container
-	// is single-user and access is gated by SSH key authentication.
+	// 6. Install profile.d script that starts D-Bus + gnome-keyring on SSH login.
 	keyringScript := `#!/bin/sh\nif [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then\n    eval $(dbus-launch --sh-syntax)\n    export DBUS_SESSION_BUS_ADDRESS\nfi\necho \"\" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null\n`
 	b.Run(fmt.Sprintf("printf '%s' > %s && chmod +x %s",
 		keyringScript, constants.KeyringProfileScript, constants.KeyringProfileScript))
 
-	// 11. Inject host user's ~/.gitconfig into the container (Req 24).
-	// Uses base64 encoding via a RUN instruction (not COPY) so the Dockerfile remains
-	// self-contained — no external build context files required. Base64 also avoids
-	// shell escaping issues with arbitrary git config content (quotes, newlines, etc.).
-	// Skipped entirely if no git config was provided (file absent on host).
+	// 7. Inject host user's ~/.gitconfig into the container (Req 24).
 	if b.gitConfig != "" {
 		encoded := base64.StdEncoding.EncodeToString([]byte(b.gitConfig))
 		gitConfigPath := fmt.Sprintf("%s/.gitconfig", info.HomeDir)
@@ -166,14 +128,68 @@ func NewDockerfileBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPu
 		))
 	}
 
-	// NOTE: CMD is intentionally NOT set here. The caller (cmd/root.go) must
-	// append agent Install() steps and the manifest RUN, then call Finalize()
-	// to append the CMD as the very last instruction. This ensures all RUN
-	// steps are ordered before CMD so Docker's layer cache is not busted by
-	// agent install steps appearing after CMD.
+	// NOTE: No SSH host keys, authorized_keys, sshd_config hardening, /run/sshd,
+	// or CMD here. Those belong in the Instance_Image (see NewInstanceImageBuilder).
 
 	return b
 }
+
+// NewInstanceImageBuilder returns a builder pre-seeded with the instance layer for
+// a per-project image (bac-<name>:latest). It starts FROM bac-base:latest and adds
+// only the per-project SSH configuration:
+//
+//   - FROM constants.BaseImageTag (bac-base:latest)
+//   - SSH host key injection (hostKeyPriv, hostKeyPub)
+//   - authorized_keys setup (publicKey)
+//   - sshd_config hardening (no password auth, no root login)
+//   - mkdir -p /run/sshd
+//
+// The caller MUST call Finalize() after this to append the CMD instruction.
+//
+// info carries the runtime-resolved Container_User identity (Req 22).
+// publicKey is the content of the user's SSH public key.
+// hostKeyPriv and hostKeyPub are the persisted SSH host key pair contents.
+func NewInstanceImageBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string) *DockerfileBuilder {
+	b := &DockerfileBuilder{info: info}
+
+	// 1. FROM the shared base image
+	b.From(constants.BaseImageTag)
+
+	// 2. Inject persisted SSH host key pair (type: constants.SSHHostKeyType)
+	privPath := fmt.Sprintf("/etc/ssh/ssh_host_%s_key", constants.SSHHostKeyType)
+	pubPath := privPath + ".pub"
+	b.Run(fmt.Sprintf(
+		"echo %s > %s && echo %s > %s && chmod 600 %s && chmod 644 %s",
+		fmt.Sprintf("%q", hostKeyPriv), privPath,
+		fmt.Sprintf("%q", hostKeyPub), pubPath,
+		privPath, pubPath,
+	))
+
+	// 3. Install SSH public key for Container_User
+	b.Run(fmt.Sprintf(
+		"mkdir -p %s/.ssh && echo %s >> %s/.ssh/authorized_keys && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys && chown -R %s:%s %s/.ssh",
+		info.HomeDir,
+		fmt.Sprintf("%q", publicKey),
+		info.HomeDir,
+		info.HomeDir,
+		info.HomeDir,
+		info.Username, info.Username,
+		info.HomeDir,
+	))
+
+	// 4. Harden sshd_config
+	b.Run("echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && echo 'PermitRootLogin no' >> /etc/ssh/sshd_config && echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config")
+
+	// 5. Ensure sshd runtime dir exists
+	b.Run("mkdir -p /run/sshd")
+
+	// NOTE: CMD is intentionally NOT set here. The caller must call Finalize()
+	// to append CMD as the very last instruction.
+
+	return b
+}
+
+
 
 // Finalize appends the CMD instruction that starts sshd in the foreground.
 // It must be called after all agent Install() steps and the manifest RUN have

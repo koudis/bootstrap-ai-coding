@@ -394,24 +394,7 @@ RUN useradd --create-home --home-dir /home/alice --uid 1000 --gid 1000 --shell /
 
 **Dockerfile instruction order (Req 21):** `NewDockerfileBuilder` seeds the base layers (FROM, openssh-server, Container_User, sudo, SSH keys, sshd_config, /run/sshd) but does **not** append `CMD`. The caller appends agent steps via `Install()`, then the manifest `RUN`, then calls `Finalize()` to append `CMD` as the final instruction. This ensures all `RUN` layers are ordered before `CMD`, keeping them in Docker's layer cache across rebuilds.
 
-```
-FROM ubuntu:26.04
-RUN apt-get install openssh-server sudo     ← base, stable, cached
-RUN groupadd/useradd <username> (or usermod rename)  ← stable per project, cached (Req 22: from info.Username)
-RUN sudoers for <username>                  ← stable, cached
-RUN SSH authorized_keys in <homeDir>/.ssh/  ← stable per user key, cached (Req 22: from info.HomeDir)
-RUN SSH host key injection                  ← stable per project, cached
-RUN sshd_config hardening                   ← stable, cached
-RUN mkdir /run/sshd                         ← stable, cached
-RUN apt-get install dbus-x11 gnome-keyring libsecret-1-0  ← keyring (CC-7), cached
-RUN install /etc/profile.d/dbus-keyring.sh  ← keyring startup script, cached
-RUN printf gitconfig > <homeDir>/.gitconfig ← git config (Req 24), base64-encoded RUN (not COPY — keeps Dockerfile self-contained); skipped if absent on host
-RUN apt-get install curl ca-certificates    ← agent step, cached after first build
-RUN nodesource setup + nodejs               ← agent step, cached after first build
-RUN npm install -g @augmentcode/auggie      ← agent step, cached after first build
-RUN echo manifest > /bac-manifest.json     ← stable when agents unchanged, cached
-CMD ["/usr/sbin/sshd", "-D"]               ← always last (Req 21.2)
-```
+> **Note:** With the two-layer architecture (see "Two-Layer Image Architecture" section below), this monolithic Dockerfile is split into a Base_Image (everything up to and including the manifest) and an Instance_Image (SSH keys, authorized_keys, sshd hardening, CMD). See that section for the updated layer split and builder API.
 
 ### Headless Keyring (D-Bus + gnome-keyring-daemon)
 
@@ -444,6 +427,136 @@ echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null
 This script runs on every SSH login (interactive shells source `/etc/profile.d/*.sh`). The keyring is per-session and uses an empty password, which is acceptable because the container is single-user and access is already gated by SSH key authentication.
 
 **Validates: CC-7**
+
+---
+
+## Two-Layer Image Architecture (TL-1 through TL-11)
+
+> See `requirements-two-layer-image.md` for the full requirements.
+
+### Motivation
+
+The current monolithic image build takes minutes (agent npm installs, apt packages, Go tarball) and is repeated per-project even though 95% of the layers are identical. Splitting into a shared Base_Image and a thin per-project Instance_Image makes subsequent project startups near-instant (< 2 seconds for the Instance_Image build).
+
+### Image Layer Split
+
+The monolithic Dockerfile (previously shown in the DockerfileBuilder section) is split at the boundary between shared infrastructure and per-project SSH configuration:
+
+- **Base_Image** (`bac-base:latest`): Everything from `FROM ubuntu:26.04` through the manifest write. Includes OS packages, Container_User, sudoers, keyring, gitconfig, all agent `Install()` steps, and the manifest. Does NOT include SSH host keys, authorized_keys, sshd hardening, or CMD.
+- **Instance_Image** (`bac-<name>:latest`): `FROM bac-base:latest` + SSH host key injection + authorized_keys + sshd_config hardening + `/run/sshd` + CMD.
+
+See the "Dockerfile Layer Order" section in the Build Resources design for the full layer listing, now annotated with which layers belong to which image.
+
+### Builder Changes
+
+The `DockerfileBuilder` is split into two construction paths:
+
+```go
+// NewBaseImageBuilder produces the Dockerfile for bac-base:latest.
+// Contains everything EXCEPT SSH keys, authorized_keys, sshd hardening, and CMD.
+func NewBaseImageBuilder(info *hostinfo.Info, strategy UserStrategy,
+    conflictingUser string, gitConfig string) *DockerfileBuilder
+
+// NewInstanceImageBuilder produces the Dockerfile for bac-<name>:latest.
+// Starts with FROM bac-base:latest, adds only per-project SSH config + CMD.
+func NewInstanceImageBuilder(info *hostinfo.Info,
+    publicKey, hostKeyPriv, hostKeyPub string) *DockerfileBuilder
+```
+
+The existing `NewDockerfileBuilder` is replaced by these two functions. Agent `Install()` methods are called on the base builder only. The instance builder has no agent steps — it's just SSH key injection + CMD.
+
+### Build Flow in `runStart`
+
+```mermaid
+flowchart TD
+    A[runStart] --> B{Base_Image exists?}
+    B -->|No| C[Build Base_Image]
+    B -->|Yes| D{Manifest matches?}
+    D -->|No| E["Print 'run --rebuild'<br/>exit 0"]
+    D -->|Yes| F{Instance_Image exists?}
+    D -->|Label absent/invalid| C
+    C --> G[Build Instance_Image]
+    F -->|No| G
+    F -->|Yes| H[Skip both builds]
+    G --> I[Create & start container]
+    H --> I
+
+    R["--rebuild"] --> C2[Build Base_Image<br/>(no-cache)]
+    C2 --> G2[Build Instance_Image]
+    G2 --> I
+```
+
+### Cache Detection Logic
+
+```go
+func determineBuilds(ctx context.Context, c *Client, enabledIDs []string, containerName string, rebuild bool) (needBase, needInstance bool, err error) {
+    if rebuild {
+        return true, true, nil
+    }
+
+    // Check base image
+    baseInfo, _, err := c.ImageInspectWithRaw(ctx, constants.BaseImageName+":latest")
+    if err != nil {
+        // Base doesn't exist — must build both
+        return true, true, nil
+    }
+
+    manifestJSON, ok := baseInfo.Config.Labels["bac.manifest"]
+    if !ok {
+        return true, true, nil // no label — rebuild base
+    }
+    var manifestIDs []string
+    if err := json.Unmarshal([]byte(manifestJSON), &manifestIDs); err != nil {
+        return true, true, nil // invalid JSON — rebuild base
+    }
+    if !StringSlicesEqual(manifestIDs, enabledIDs) {
+        // Manifest mismatch — caller prints message and exits
+        return false, false, ErrManifestMismatch
+    }
+
+    // Base is good. Check instance image.
+    instanceTag := containerName + ":latest"
+    _, _, err = c.ImageInspectWithRaw(ctx, instanceTag)
+    if err != nil {
+        return false, true, nil // instance missing — build it only
+    }
+
+    return false, false, nil // both cached
+}
+```
+
+### `--rebuild` Behavior
+
+When `--rebuild` is set:
+1. Stop and remove existing container (if any)
+2. Build Base_Image with `NoCache: true`
+3. Build Instance_Image (inherits fresh base)
+4. Create and start new container
+
+### `--stop-and-remove` Behavior
+
+No change to image handling. Only the container is stopped/removed. Both Base_Image and Instance_Image remain cached for fast restart.
+
+### `--purge` Behavior
+
+Removes all images (both `bac-base:latest` and all `bac-<name>:latest` instance images) via the existing `bac.managed` label filter.
+
+### Constants Addition
+
+```go
+// constants.go
+const BaseImageName = "bac-base"
+```
+
+### Startup Sequence (Updated)
+
+The startup sequence diagram above is updated: the "Build image" step becomes two steps:
+1. "Build Base_Image" (only if needed)
+2. "Build Instance_Image" (only if needed)
+
+The manifest comparison now checks the Base_Image label rather than the per-project image label.
+
+**Validates: TL-1 through TL-11**
 
 ---
 
@@ -1127,22 +1240,33 @@ This keeps the Dockerfile generation self-contained within the builder and avoid
 
 ### Dockerfile Layer Order (with Build Resources)
 
-When all default agents are enabled, the generated Dockerfile layers are:
+When all default agents are enabled, the generated Dockerfile layers are split across two images (see "Two-Layer Image Architecture" section):
 
+**Base_Image (`bac-base:latest`):**
 ```
 FROM ubuntu:26.04
 RUN apt-get install openssh-server sudo         ← base
-RUN useradd <username>                          ← stable per project
-RUN sudoers, SSH keys, sshd_config, /run/sshd   ← stable
+RUN useradd <username>                          ← stable per user
+RUN sudoers                                     ← stable
 RUN dbus-x11 gnome-keyring libsecret-1-0        ← keyring (CC-7)
 RUN /etc/profile.d/dbus-keyring.sh              ← keyring startup
 RUN gitconfig                                   ← git config (Req 24)
 RUN curl ca-certificates git + nodejs           ← Claude/Augment shared deps
 RUN npm install -g @anthropic-ai/claude-code    ← Claude Code
 RUN npm install -g @augmentcode/auggie          ← Augment Code
-RUN python3 python3-pip cmake build-essential default-jdk pkg-config libssl-dev libffi-dev unzip wget  ← Build Resources (system)
+RUN python3 cmake build-essential default-jdk …  ← Build Resources (system)
 RUN go tarball + /etc/profile.d/golang.sh       ← Build Resources (Go)
-RUN uv install (UV_INSTALL_DIR=/usr/local/bin)  ← Build Resources (uv, system-wide)
+RUN uv install (UV_INSTALL_DIR=/usr/local/bin)  ← Build Resources (uv)
 RUN echo manifest > /bac-manifest.json          ← manifest
-CMD ["/usr/sbin/sshd", "-D"]                    ← always last
+# NO CMD — that belongs in Instance_Image
+```
+
+**Instance_Image (`bac-<name>:latest`):**
+```
+FROM bac-base:latest
+RUN SSH host key injection                      ← per-project (core Req 13)
+RUN SSH authorized_keys                         ← per-user key (core Req 4)
+RUN sshd_config hardening                       ← stable
+RUN mkdir /run/sshd                             ← stable
+CMD ["/usr/sbin/sshd", "-D"]                    ← always last (Req 21.2)
 ```

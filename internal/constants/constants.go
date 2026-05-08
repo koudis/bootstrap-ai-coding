@@ -10,6 +10,14 @@ const (
 	// Corresponds to the Base_Container_Image glossary term.
 	BaseContainerImage = "ubuntu:26.04"
 
+	// BaseImageName is the name of the base Docker image used in the
+	// two-layer image architecture. The instance image uses FROM BaseImageName:latest.
+	BaseImageName = "bac-base"
+
+	// BaseImageTag is the full image reference for the base image (name + ":latest").
+	// Used in FROM directives and image inspection calls.
+	BaseImageTag = BaseImageName + ":latest"
+
 	// WorkspaceMountPath is the path inside the container where the project is mounted.
 	// Corresponds to the Mounted_Volume glossary term.
 	WorkspaceMountPath = "/workspace"

@@ -497,28 +497,15 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		enabledIDs = append(enabledIDs, a.ID())
 	}
 
-	needBuild := flagRebuild
-	if !needBuild {
-		imgInfo, _, err := c.ImageInspectWithRaw(ctx, imageTag)
-		if err != nil {
-			needBuild = true
-		} else {
-			manifestJSON, ok := imgInfo.Config.Labels["bac.manifest"]
-			if !ok {
-				needBuild = true
-			} else {
-				var manifestIDs []string
-				if err := json.Unmarshal([]byte(manifestJSON), &manifestIDs); err != nil {
-					needBuild = true
-				} else if !StringSlicesEqual(manifestIDs, enabledIDs) {
-					fmt.Println("Agent config changed — run with --rebuild to update the image.")
-					return nil
-				}
-			}
-		}
+	needBase, needInstance, buildErr := determineBuilds(ctx, c, enabledIDs, containerName, flagRebuild)
+	if buildErr == ErrManifestMismatch {
+		fmt.Println("Agent config changed — run with --rebuild to update the image.")
+		return nil
+	} else if buildErr != nil {
+		return fmt.Errorf("determining build requirements: %w", buildErr)
 	}
 
-	if needBuild {
+	if needBase {
 		// Check for UID/GID conflict in base image
 		strategy := dockerpkg.UserStrategyCreate
 		conflictingUser := ""
@@ -547,30 +534,57 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			gitConfigContent = string(data)
 		}
 
-		b := dockerpkg.NewDockerfileBuilder(info, publicKey, hostKeyPriv, hostKeyPub, strategy, conflictingUser, gitConfigContent)
+		baseBuilder := dockerpkg.NewBaseImageBuilder(info, strategy, conflictingUser, gitConfigContent)
 		for _, a := range enabledAgents {
-			a.Install(b)
+			a.Install(baseBuilder)
 		}
 		manifestJSON, _ := json.Marshal(enabledIDs)
-		b.Run(fmt.Sprintf("echo %q > %s", string(manifestJSON), constants.ManifestFilePath))
-		b.Finalize() // CMD must be last — after all agent RUN steps
-		labels["bac.manifest"] = string(manifestJSON)
+		baseBuilder.Run(fmt.Sprintf("echo %q > %s", string(manifestJSON), constants.ManifestFilePath))
 
-		spec := dockerpkg.ContainerSpec{
+		baseLabels := map[string]string{
+			"bac.managed":  "true",
+			"bac.manifest": string(manifestJSON),
+		}
+
+		baseSpec := dockerpkg.ContainerSpec{
 			Name:       containerName,
-			ImageTag:   imageTag,
-			Dockerfile: b.Build(),
-			Labels:     labels,
+			ImageTag:   constants.BaseImageTag,
+			Dockerfile: baseBuilder.Build(),
+			Labels:     baseLabels,
 			HostUID:    info.UID,
 			HostGID:    info.GID,
 			NoCache:    flagRebuild,
 		}
 
-		fmt.Println("Building image...")
-		buildOutput, err := dockerpkg.BuildImage(ctx, c, spec, flagVerbose)
+		fmt.Println("Building base image...")
+		buildOutput, err := dockerpkg.BuildImage(ctx, c, baseSpec, flagVerbose)
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildOutput)
-			return fmt.Errorf("image build failed: %w", err)
+			return fmt.Errorf("base image build failed: %w", err)
+		}
+
+		// Base was rebuilt, so instance must also be rebuilt.
+		needInstance = true
+	}
+
+	if needInstance {
+		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		instanceBuilder.Finalize()
+
+		instanceSpec := dockerpkg.ContainerSpec{
+			Name:       containerName,
+			ImageTag:   imageTag,
+			Dockerfile: instanceBuilder.Build(),
+			Labels:     labels,
+			HostUID:    info.UID,
+			HostGID:    info.GID,
+		}
+
+		fmt.Println("Building instance image...")
+		buildOutput, err := dockerpkg.BuildImage(ctx, c, instanceSpec, flagVerbose)
+		if err != nil {
+			fmt.Fprint(os.Stderr, buildOutput)
+			return fmt.Errorf("instance image build failed: %w", err)
 		}
 	}
 

@@ -28,7 +28,7 @@ var aptPackages = []string{
 	// Common build dependencies
 	"libssl-dev", "libffi-dev",
 	// Utilities
-	"curl", "ca-certificates", "unzip", "wget",
+	"curl", "ca-certificates", "unzip", "wget", "neovim",
 }
 
 // goVersion is the Go release installed via the official tarball.

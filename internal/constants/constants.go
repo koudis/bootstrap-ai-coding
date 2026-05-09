@@ -112,6 +112,12 @@ const (
 	// HostBindIP is the IP address containers bind their SSH port to on the host.
 	// Satisfies R7.
 	HostBindIP = "127.0.0.1"
+
+	// DefaultRestartPolicy is the Docker restart policy applied to containers
+	// by default. "unless-stopped" means the container restarts after a host
+	// reboot unless the user explicitly stopped it.
+	// Satisfies Req 25.2.
+	DefaultRestartPolicy = "unless-stopped"
 )
 
 // ImageBuildTimeout is the maximum time allowed for a Docker image build.

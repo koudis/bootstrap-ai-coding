@@ -66,18 +66,37 @@ func ValidateStartOnlyFlags(mode Mode, changedFlags []string) error {
 		mf = "--purge"
 	}
 	startOnly := map[string]bool{
-		"agents":               true,
-		"port":                 true,
-		"ssh-key":              true,
-		"rebuild":              true,
+		"agents":                true,
+		"port":                  true,
+		"ssh-key":               true,
+		"rebuild":               true,
 		"no-update-known-hosts": true,
-		"no-update-ssh-config": true,
-		"verbose":              true,
+		"no-update-ssh-config":  true,
+		"verbose":               true,
+		"docker-restart-policy": true,
 	}
 	for _, name := range changedFlags {
 		if startOnly[name] {
 			return fmt.Errorf("--%s is not valid with %s", name, mf)
 		}
+	}
+	return nil
+}
+
+// ValidRestartPolicies is the set of Docker restart policies accepted by
+// the --docker-restart-policy flag.
+var ValidRestartPolicies = map[string]bool{
+	"no":             true,
+	"always":         true,
+	"unless-stopped": true,
+	"on-failure":     true,
+}
+
+// ValidateRestartPolicy returns an error if policy is not one of the accepted
+// Docker restart policies.
+func ValidateRestartPolicy(policy string) error {
+	if !ValidRestartPolicies[policy] {
+		return fmt.Errorf("invalid --docker-restart-policy value %q: must be one of: no, always, unless-stopped, on-failure", policy)
 	}
 	return nil
 }
@@ -118,15 +137,16 @@ func ParseAgentsFlag(s string) []string {
 }
 
 var (
-	flagAgents             string
-	flagPort               int
-	flagSSHKey             string
-	flagRebuild            bool
-	flagStopAndRemove      bool
-	flagPurge              bool
-	flagNoUpdateKnownHosts bool
-	flagNoUpdateSSHConfig  bool
-	flagVerbose            bool
+	flagAgents              string
+	flagPort                int
+	flagSSHKey              string
+	flagRebuild             bool
+	flagStopAndRemove       bool
+	flagPurge               bool
+	flagNoUpdateKnownHosts  bool
+	flagNoUpdateSSHConfig   bool
+	flagVerbose             bool
+	flagDockerRestartPolicy string
 )
 
 var rootCmd = &cobra.Command{
@@ -154,6 +174,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagNoUpdateKnownHosts, "no-update-known-hosts", false, "Skip automatic ~/.ssh/known_hosts management")
 	rootCmd.Flags().BoolVar(&flagNoUpdateSSHConfig, "no-update-ssh-config", false, "Skip automatic ~/.ssh/config management")
 	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Stream Docker build output to stdout in real time")
+	rootCmd.Flags().StringVar(&flagDockerRestartPolicy, "docker-restart-policy", constants.DefaultRestartPolicy, "Docker restart policy for the container (no, always, unless-stopped, on-failure)")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -188,6 +209,12 @@ func run(cmd *cobra.Command, args []string) error {
 	if mode == ModeStart && cmd.Flags().Changed("port") {
 		if flagPort < 1024 || flagPort > 65535 {
 			return fmt.Errorf("--port %d is out of range; must be between 1024 and 65535", flagPort)
+		}
+	}
+
+	if mode == ModeStart {
+		if err := ValidateRestartPolicy(flagDockerRestartPolicy); err != nil {
+			return err
 		}
 	}
 
@@ -631,11 +658,12 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	spec := dockerpkg.ContainerSpec{
-		Name:     containerName,
-		ImageTag: imageTag,
-		Mounts:   mounts,
-		SSHPort:  sshPort,
-		Labels:   labels,
+		Name:          containerName,
+		ImageTag:      imageTag,
+		Mounts:        mounts,
+		SSHPort:       sshPort,
+		Labels:        labels,
+		RestartPolicy: flagDockerRestartPolicy,
 	}
 
 	if _, err := dockerpkg.CreateContainer(ctx, c, spec); err != nil {

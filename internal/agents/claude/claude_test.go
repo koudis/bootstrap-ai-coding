@@ -313,9 +313,11 @@ func TestClaudeInstallNodeAlreadyInstalled(t *testing.T) {
 		"must always install curl, ca-certificates, git")
 
 	// Should have added exactly 3 lines (apt-get prereqs + npm install + symlink)
+	// plus optionally 1 more if ~/.claude/CLAUDE.md exists on the host (memory injection)
 	linesAfter := len(b.Lines())
-	require.Equal(t, linesBefore+3, linesAfter,
-		"must add exactly 3 RUN steps when Node.js is already installed (prereqs + npm + symlink)")
+	added := linesAfter - linesBefore
+	require.True(t, added == 3 || added == 4,
+		"must add 3 RUN steps (prereqs + npm + symlink) plus optionally 1 memory injection step, got %d", added)
 }
 
 // ---------------------------------------------------------------------------

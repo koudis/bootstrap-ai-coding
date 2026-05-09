@@ -27,7 +27,17 @@ var aptPackages = []string{
 	"default-jdk",
 	// Common build dependencies
 	"libssl-dev", "libffi-dev",
-	// Utilities
+	// Search and text processing
+	"ripgrep", "fd-find", "jq",
+	// Version control extras
+	"git-lfs",
+	// Terminal and shell utilities
+	"tmux", "less", "file", "shellcheck",
+	// Database
+	"sqlite3",
+	// Archive handling
+	"zip",
+	// General utilities
 	"curl", "ca-certificates", "unzip", "wget", "neovim",
 }
 
@@ -95,6 +105,11 @@ func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client,
 		{[]string{"cmake", "--version"}, "cmake"},
 		{[]string{"javac", "-version"}, "javac"},
 		{[]string{"bash", "-lc", "go version"}, "go"},
+		{[]string{"rg", "--version"}, "ripgrep"},
+		{[]string{"fdfind", "--version"}, "fd-find"},
+		{[]string{"jq", "--version"}, "jq"},
+		{[]string{"git-lfs", "--version"}, "git-lfs"},
+		{[]string{"tmux", "-V"}, "tmux"},
 	}
 	for _, chk := range checks {
 		exitCode, err := docker.ExecInContainer(ctx, c, containerID, chk.cmd)

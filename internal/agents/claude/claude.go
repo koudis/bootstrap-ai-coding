@@ -6,6 +6,7 @@ package claude
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,6 +42,46 @@ func (a *claudeAgent) Install(b *docker.DockerfileBuilder) {
 		"ln -sf %s/claude.json %s/.claude.json",
 		filepath.Join(b.HomeDir(), ".claude"),
 		b.HomeDir(),
+	))
+
+	// Copy host user's Claude Code memory (CLAUDE.md) into the image so that
+	// global instructions are available even before the bind-mount overlays.
+	// The bind-mount at runtime will take precedence, but this ensures the
+	// memory is baked into the image as a baseline.
+	a.injectMemory(b)
+}
+
+// injectMemory copies the host user's ~/.claude/CLAUDE.md into the container
+// image during build. Uses base64 encoding to safely embed file content in a
+// RUN instruction (same pattern as gitconfig injection in the base builder).
+func (a *claudeAgent) injectMemory(b *docker.DockerfileBuilder) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return // best-effort; skip if we can't determine home
+	}
+
+	claudeDir := filepath.Join(home, ".claude")
+	memoryFile := filepath.Join(claudeDir, "CLAUDE.md")
+
+	data, err := os.ReadFile(memoryFile)
+	if err != nil {
+		return // file doesn't exist or unreadable — skip silently
+	}
+	if len(data) == 0 {
+		return
+	}
+
+	containerClaudeDir := filepath.Join(b.HomeDir(), ".claude")
+	containerMemoryFile := filepath.Join(containerClaudeDir, "CLAUDE.md")
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	b.Run(fmt.Sprintf(
+		"mkdir -p %s && echo %s | base64 -d > %s && chown -R %s:%s %s",
+		containerClaudeDir,
+		encoded,
+		containerMemoryFile,
+		b.Username(), b.Username(),
+		containerClaudeDir,
 	))
 }
 

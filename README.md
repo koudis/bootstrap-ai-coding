@@ -2,7 +2,7 @@
 
 `bootstrap-ai-coding` (`bac`) is a Go CLI tool that provisions an isolated Docker container for AI-assisted coding sessions.
 
-Primarirly designed to work with Visual Studio Code but it works any IDE with code-over-ssh. 
+Primarily designed to work with Visual Studio Code but it works with any IDE with code-over-ssh.
 
 ## Install
 
@@ -10,24 +10,26 @@ Primarirly designed to work with Visual Studio Code but it works any IDE with co
 # arm64
 wget https://github.com/koudis/bootstrap-ai-coding/releases/latest/download/bac-linux-arm64 -o bac
 
-# amd64 
+# amd64
 wget https://github.com/koudis/bootstrap-ai-coding/releases/latest/download/bac-linux-amd64 -o bac
 ```
 
 ## How to run
 
 1. `bac <project_path>`
-1. open Visual Studio Code, press Ctrl+Shift+P, run Remote-SSH and choose bac-<project_folder_name> target to connect.
-1. <project_path> can be found under /workspace 
+2. Open Visual Studio Code, press Ctrl+Shift+P, run Remote-SSH and choose `bac-<project_folder_name>` target to connect.
+3. `<project_path>` can be found under `/workspace`
 
-where project_folder_name is a name of the bottom-most folder in project_path. (/my/nice/project --> project)
+where `project_folder_name` is the name of the bottom-most folder in `project_path`. (`/my/nice/project` → `project`)
 
 ## How it works
 
 The tool:
 
 1. Checks you are not running as root and that Docker is available (≥ 20.10)
-2. Builds a Docker image on demand (`ubuntu:26.04` base, SSH server, non-root `dev` user, enabled AI agents)
+2. Builds a two-layer Docker image on demand:
+   - **Base layer** (`bac-base:latest`): `ubuntu:26.04`, SSH server, container user matching your host username/UID/GID
+   - **Instance layer**: enabled AI agents and build tools
 3. Mounts your project directory into the container at `/workspace`
 4. Starts the container with an SSH server bound to a persisted port (default: 2222+)
 5. Keeps `~/.ssh/known_hosts` and `~/.ssh/config` in sync so you can connect immediately
@@ -38,14 +40,13 @@ Data directory:  ~/.config/bootstrap-ai-coding/bac-myproject/
 Project directory: /home/user/myproject
 SSH port:        2222
 SSH connect:     ssh bac-myproject
-Enabled agents:  claude-code, augment-code
+Enabled agents:  claude-code, augment-code, build-resources
 ```
 
-After that, `ssh bac-myproject` also works — no port or username to remember.
+After that, `ssh bac-myproject` works — no port or username to remember.
 
 ## Prerequisites
 
-- Go 1.25+
 - Docker daemon ≥ 20.10 running on the host
 - An SSH public key at `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub` (or use `--ssh-key`)
 
@@ -97,7 +98,7 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | Flag | Description |
 |---|---|
 | `<project-path>` | Path to the project directory to mount (required for start/stop) |
-| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code`) |
+| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code,build-resources`) |
 | `--port <n>` | Override the SSH port (1024–65535; default: auto-selected from 2222 upward) |
 | `--ssh-key <path>` | Override the SSH public key path |
 | `--rebuild` | Force a full container image rebuild |
@@ -105,21 +106,24 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | `--no-update-ssh-config` | Skip automatic `~/.ssh/config` management |
 | `--stop-and-remove` | Stop and remove the container for the given project |
 | `--purge` | Remove all tool data, containers, and images (with confirmation) |
+| `--docker-restart-policy <policy>` | Docker restart policy for the container (default: `unless-stopped`) |
+| `-v`, `--verbose` | Stream Docker build output to stdout in real time |
 | `--version` | Print the version and exit |
 
 ## Supported Agents
 
-Both agents are enabled by default. Use `--agents` to enable a specific subset.
+All three agents are enabled by default. Use `--agents` to enable a specific subset.
 
-| Agent ID | Tool | Credential store | Container mount |
+| Agent ID | Description | Credential store | Container mount |
 |---|---|---|---|
-| `claude-code` | [Claude Code](https://github.com/anthropics/claude-code) by Anthropic | `~/.claude/` | `/home/dev/.claude/` |
-| `augment-code` | [Augment Code](https://www.augmentcode.com) (Auggie CLI) | `~/.augment/` | `/home/dev/.augment/` |
+| `claude-code` | [Claude Code](https://github.com/anthropics/claude-code) by Anthropic | `~/.claude/` | `/home/<user>/.claude/` |
+| `augment-code` | [Augment Code](https://www.augmentcode.com) (Auggie CLI) | `~/.augment/` | `/home/<user>/.augment/` |
+| `build-resources` | Common build toolchains and runtimes (Python, Go, Java, CMake, ripgrep, etc.) | — | — |
 
 ### Examples
 
 ```bash
-# Both agents (default)
+# All agents (default)
 bac <project-path>
 
 # Claude Code only
@@ -127,11 +131,32 @@ bac <project-path> --agents claude-code
 
 # Augment Code only
 bac <project-path> --agents augment-code
+
+# Claude Code + build tools
+bac <project-path> --agents claude-code,build-resources
 ```
 
 ## Agents
 
-Both **Claude Code** (`claude-code`) and **Augment Code** (`augment-code`) are enabled by default.
+### Claude Code (`claude-code`)
+
+Installs Node.js 22 and the `@anthropic-ai/claude-code` npm package globally. Credential store at `~/.claude/` is bind-mounted into the container.
+
+### Augment Code (`augment-code`)
+
+Installs Node.js 22 and the `@augmentcode/auggie` npm package globally. Credential store at `~/.augment/` is bind-mounted into the container.
+
+### Build Resources (`build-resources`)
+
+A pseudo-agent that installs common build toolchains and language runtimes:
+
+- **Python**: python3, pip, venv, dev headers, pytest, setuptools, wheel, uv
+- **C/C++**: build-essential, cmake, pkg-config, libssl-dev, libffi-dev
+- **Java**: default-jdk
+- **Go**: 1.24.2 (official tarball)
+- **Tools**: ripgrep, fd-find, jq, git-lfs, tmux, shellcheck, neovim, sqlite3, curl, wget, zip, unzip
+
+No credentials to persist — this agent only adds build tools to the image.
 
 ### Credential persistence
 
@@ -159,6 +184,10 @@ import _ "github.com/koudis/bootstrap-ai-coding/internal/agents/myagent"
 ```
 
 See [`internal/agents/claude/claude.go`](internal/agents/claude/claude.go) for a reference implementation and the [agent module guide](.kiro/steering/agent-module.md) for full instructions.
+
+## Container user
+
+The container user matches your host username and UID/GID. If your host user is `alice` (UID 1000, GID 1000), the container user is also `alice` with the same IDs — file ownership is seamless across the bind-mount.
 
 ## Data directory
 
@@ -189,7 +218,7 @@ make release
 go test ./...
 
 # Integration tests
-# Integration tests (requires a running Docker daemon and explicit consent).
+# Requires a running Docker daemon and explicit consent.
 # Uses -p 1 to run packages sequentially — they share Docker state (base image
 # removal/pull) and will race or timeout if run in parallel.
 # The suite automatically removes the base image before running to ensure
@@ -204,7 +233,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
 
-Coverage target: ~80% line coverage on all non-integration packages.
+Coverage target: ≥ 80% line coverage on all non-integration packages.
 
 ## Exit codes
 

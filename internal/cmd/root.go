@@ -498,7 +498,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	needBase, needInstance, buildErr := determineBuilds(ctx, c, enabledIDs, containerName, flagRebuild)
-	if buildErr == ErrManifestMismatch {
+	if errors.Is(buildErr, ErrManifestMismatch) {
 		fmt.Println("Agent config changed — run with --rebuild to update the image.")
 		return nil
 	} else if buildErr != nil {

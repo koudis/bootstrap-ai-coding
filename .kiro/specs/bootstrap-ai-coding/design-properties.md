@@ -1,5 +1,14 @@
 # Correctness Properties and Testing Strategy
 
+> **Related design documents:**
+> - [design.md](design.md) — Overview and document index
+> - [design-architecture.md](design-architecture.md) — High-level architecture, package layout, sequence diagrams
+> - [design-components.md](design-components.md) — Core component designs
+> - [design-docker.md](design-docker.md) — Two-layer Docker image architecture
+> - [design-data-models.md](design-data-models.md) — Data models, error handling, test infrastructure
+> - [design-build-resources.md](design-build-resources.md) — Build Resources agent module design
+> - [design-agents.md](design-agents.md) — Agent modules: contract, implementations
+
 *A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
 ---
@@ -301,6 +310,22 @@
 *For any* comma-separated `--agents` string, the CLI SHALL reject it if the parsed list is empty or contains any ID not in the AgentRegistry.
 
 **Validates: CLI-6**
+
+---
+
+#### Property 55: --docker-restart-policy always validates against the allowed set (CLI-7)
+
+*For any* string value of `--docker-restart-policy`, the CLI SHALL accept it if and only if it is one of: `no`, `always`, `unless-stopped`, `on-failure`. Any other value SHALL produce a non-nil error.
+
+**Validates: CLI-7, Req 25.1, 25.8**
+
+---
+
+#### Property 56: Container spec always includes the configured restart policy
+
+*For any* valid restart policy value (`no`, `always`, `unless-stopped`, `on-failure`), the `ContainerSpec` produced for container creation SHALL have its `RestartPolicy` field set to that exact value.
+
+**Validates: Req 25.3**
 
 ---
 
@@ -835,6 +860,11 @@ func TestSSHConfigEntryUsesRuntimeUsername(t *testing.T) {
 | `TestNoUpdateSSHConfigFlagWithPurgeRejected` | CLI-3 |
 | `TestVerboseFlagWithStopRejected` | CLI-3, Req 20.5 |
 | `TestVerboseFlagWithPurgeRejected` | CLI-3, Req 20.5 |
+| `TestRestartPolicyFlagWithStopRejected` | CLI-3, Req 25.9 |
+| `TestRestartPolicyFlagWithPurgeRejected` | CLI-3, Req 25.9 |
+| `TestRestartPolicyInvalidValueRejected` | CLI-7, Req 25.8 |
+| `TestRestartPolicyDefaultIsUnlessStopped` | Req 25.2 |
+| `TestRestartPolicyAppliedToContainerSpec` | Req 25.3 |
 | `TestVerboseSilentModeNoStdout` | Req 20.2 |
 | `TestVerboseModeStreamsOutput` | Req 20.3 |
 | `TestHostInfoCurrentReturnsValidInfo` | Req 22.1, 22.3 |

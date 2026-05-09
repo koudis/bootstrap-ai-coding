@@ -18,13 +18,17 @@
 
 ## Document Structure
 
-The design is split across four files:
+The design is split across multiple focused files:
 
 | File | Contents |
 |---|---|
 | `design.md` (this file) | Overview, key design goals, document index |
-| [`design-architecture.md`](design-architecture.md) | Part 1 — Core: component diagram, package layout, startup/stop/purge sequences, all core component designs, data models, error handling |
-| [`design-agents.md`](design-agents.md) | Part 2 — Agent modules: contract, Claude Code implementation, adding future agents |
+| [`design-architecture.md`](design-architecture.md) | Core architecture: component diagram, package layout, startup/stop/purge sequence diagrams |
+| [`design-components.md`](design-components.md) | Core component designs: Constants, HostInfo, Agent Interface, AgentRegistry, DockerfileBuilder, Headless Keyring, Git Config Forwarding, Restart Policy, Base Image Inspection, Verbose Mode, Naming, SSH, DataDir |
+| [`design-docker.md`](design-docker.md) | Two-layer Docker image architecture (TL-1 through TL-11): motivation, layer split, builder changes, build flow, cache detection |
+| [`design-data-models.md`](design-data-models.md) | Core data models (Mode, Config, ContainerSpec, SessionSummary), error handling tables, integration test infrastructure |
+| [`design-build-resources.md`](design-build-resources.md) | Build Resources agent module: implementation, design decisions, RunAsUser extension, Dockerfile layer order |
+| [`design-agents.md`](design-agents.md) | Agent modules: contract, Claude Code implementation, adding future agents |
 | [`design-properties.md`](design-properties.md) | Correctness properties (Properties 1–51) and full testing strategy |
 
 ## Related Documents
@@ -32,3 +36,4 @@ The design is split across four files:
 - `requirements-core.md` — core application requirements (Req 1–22, including Req 22: Dynamic Container User Identity)
 - `requirements-agents.md` — agent module requirements (CC-1–CC-6 for Claude Code, AC-1–AC-6 for Augment Code)
 - `requirements-cli-combinations.md` — valid and invalid CLI flag combinations (CLI-1–CLI-6)
+- `requirements-two-layer-image.md` — two-layer Docker image requirements (TL-1–TL-11)

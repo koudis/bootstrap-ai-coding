@@ -10,6 +10,14 @@ const (
 	// Corresponds to the Base_Container_Image glossary term.
 	BaseContainerImage = "ubuntu:26.04"
 
+	// BaseImageName is the name of the base Docker image used in the
+	// two-layer image architecture. The instance image uses FROM BaseImageName:latest.
+	BaseImageName = "bac-base"
+
+	// BaseImageTag is the full image reference for the base image (name + ":latest").
+	// Used in FROM directives and image inspection calls.
+	BaseImageTag = BaseImageName + ":latest"
+
 	// WorkspaceMountPath is the path inside the container where the project is mounted.
 	// Corresponds to the Mounted_Volume glossary term.
 	WorkspaceMountPath = "/workspace"
@@ -50,10 +58,15 @@ const (
 	// Corresponds to the Agent_ID glossary term for Augment Code (AC-1).
 	AugmentCodeAgentName = "augment-code"
 
+	// BuildResourcesAgentName is the stable Agent_ID for the Build Resources
+	// pseudo-agent module that installs common build toolchains and runtimes.
+	// Corresponds to the Agent_ID glossary term for Build Resources (BR-1).
+	BuildResourcesAgentName = "build-resources"
+
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
-	// --agents flag is omitted. Both Claude Code and Augment Code are enabled
-	// by default.
-	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName
+	// --agents flag is omitted. Claude Code, Augment Code, and Build Resources
+	// are enabled by default.
+	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName + "," + BuildResourcesAgentName
 
 	// SSHHostKeyType is the algorithm used for the container's SSH host key pair.
 	// Determines the key file names on disk (ssh_host_<type>_key) and the path
@@ -72,6 +85,10 @@ const (
 	// ToolDataFilePerm is the file permission for all files written to Tool_Data_Dir.
 	// Satisfies Req 15.3.
 	ToolDataFilePerm = 0o600
+
+	// GitConfigPerm is the file permission for the injected .gitconfig inside the container.
+	// Read-only for all users. Satisfies Req 24.
+	GitConfigPerm = 0o444
 
 	// KnownHostsFile is the path to the SSH client's known_hosts file on the Host.
 	// Corresponds to the Known_Hosts_File glossary term.
@@ -95,6 +112,12 @@ const (
 	// HostBindIP is the IP address containers bind their SSH port to on the host.
 	// Satisfies R7.
 	HostBindIP = "127.0.0.1"
+
+	// DefaultRestartPolicy is the Docker restart policy applied to containers
+	// by default. "unless-stopped" means the container restarts after a host
+	// reboot unless the user explicitly stopped it.
+	// Satisfies Req 25.2.
+	DefaultRestartPolicy = "unless-stopped"
 )
 
 // ImageBuildTimeout is the maximum time allowed for a Docker image build.

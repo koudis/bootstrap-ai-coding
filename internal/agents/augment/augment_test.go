@@ -19,22 +19,13 @@ import (
 	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
-// fixedHostKeyPriv and fixedHostKeyPub are stable test values used wherever
-// the exact key content is not the subject of the property under test.
-const (
-	fixedHostKeyPriv = "-----BEGIN OPENSSH PRIVATE KEY-----\nfakePrivKey\n-----END OPENSSH PRIVATE KEY-----"
-	fixedHostKeyPub  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfakeHostPub host-key"
-	fixedPublicKey   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfakePubKey test@host"
-)
-
 // newTestBuilder returns a DockerfileBuilder pre-seeded with the base layer,
 // using fixed key material and UserStrategyCreate with uid=1000, gid=1000.
 func newTestBuilder() *docker.DockerfileBuilder {
-	return docker.NewDockerfileBuilder(
+	return docker.NewBaseImageBuilder(
 		&hostinfo.Info{Username: "testuser", HomeDir: "/home/testuser", UID: 1000, GID: 1000},
-		fixedPublicKey,
-		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
+		"",
 	)
 }
 

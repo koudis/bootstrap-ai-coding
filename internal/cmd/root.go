@@ -66,18 +66,37 @@ func ValidateStartOnlyFlags(mode Mode, changedFlags []string) error {
 		mf = "--purge"
 	}
 	startOnly := map[string]bool{
-		"agents":               true,
-		"port":                 true,
-		"ssh-key":              true,
-		"rebuild":              true,
+		"agents":                true,
+		"port":                  true,
+		"ssh-key":               true,
+		"rebuild":               true,
 		"no-update-known-hosts": true,
-		"no-update-ssh-config": true,
-		"verbose":              true,
+		"no-update-ssh-config":  true,
+		"verbose":               true,
+		"docker-restart-policy": true,
 	}
 	for _, name := range changedFlags {
 		if startOnly[name] {
 			return fmt.Errorf("--%s is not valid with %s", name, mf)
 		}
+	}
+	return nil
+}
+
+// ValidRestartPolicies is the set of Docker restart policies accepted by
+// the --docker-restart-policy flag.
+var ValidRestartPolicies = map[string]bool{
+	"no":             true,
+	"always":         true,
+	"unless-stopped": true,
+	"on-failure":     true,
+}
+
+// ValidateRestartPolicy returns an error if policy is not one of the accepted
+// Docker restart policies.
+func ValidateRestartPolicy(policy string) error {
+	if !ValidRestartPolicies[policy] {
+		return fmt.Errorf("invalid --docker-restart-policy value %q: must be one of: no, always, unless-stopped, on-failure", policy)
 	}
 	return nil
 }
@@ -118,15 +137,16 @@ func ParseAgentsFlag(s string) []string {
 }
 
 var (
-	flagAgents             string
-	flagPort               int
-	flagSSHKey             string
-	flagRebuild            bool
-	flagStopAndRemove      bool
-	flagPurge              bool
-	flagNoUpdateKnownHosts bool
-	flagNoUpdateSSHConfig  bool
-	flagVerbose            bool
+	flagAgents              string
+	flagPort                int
+	flagSSHKey              string
+	flagRebuild             bool
+	flagStopAndRemove       bool
+	flagPurge               bool
+	flagNoUpdateKnownHosts  bool
+	flagNoUpdateSSHConfig   bool
+	flagVerbose             bool
+	flagDockerRestartPolicy string
 )
 
 var rootCmd = &cobra.Command{
@@ -154,6 +174,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagNoUpdateKnownHosts, "no-update-known-hosts", false, "Skip automatic ~/.ssh/known_hosts management")
 	rootCmd.Flags().BoolVar(&flagNoUpdateSSHConfig, "no-update-ssh-config", false, "Skip automatic ~/.ssh/config management")
 	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Stream Docker build output to stdout in real time")
+	rootCmd.Flags().StringVar(&flagDockerRestartPolicy, "docker-restart-policy", constants.DefaultRestartPolicy, "Docker restart policy for the container (no, always, unless-stopped, on-failure)")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -188,6 +209,12 @@ func run(cmd *cobra.Command, args []string) error {
 	if mode == ModeStart && cmd.Flags().Changed("port") {
 		if flagPort < 1024 || flagPort > 65535 {
 			return fmt.Errorf("--port %d is out of range; must be between 1024 and 65535", flagPort)
+		}
+	}
+
+	if mode == ModeStart {
+		if err := ValidateRestartPolicy(flagDockerRestartPolicy); err != nil {
+			return err
 		}
 	}
 
@@ -456,6 +483,15 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 
 	for _, a := range enabledAgents {
 		resolved := datadir.ResolveCredentialPath(a.CredentialStorePath(), "")
+		if resolved == "" {
+			// Agent has no credential store (e.g. build-resources) — skip.
+			agentStatuses = append(agentStatuses, agentCredStatus{
+				a:              a,
+				resolvedPath:   "",
+				hasCredentials: true,
+			})
+			continue
+		}
 		if err := datadir.EnsureCredentialDir(resolved); err != nil {
 			return fmt.Errorf("ensuring credential dir for %s: %w", a.ID(), err)
 		}
@@ -488,28 +524,15 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		enabledIDs = append(enabledIDs, a.ID())
 	}
 
-	needBuild := flagRebuild
-	if !needBuild {
-		imgInfo, _, err := c.ImageInspectWithRaw(ctx, imageTag)
-		if err != nil {
-			needBuild = true
-		} else {
-			manifestJSON, ok := imgInfo.Config.Labels["bac.manifest"]
-			if !ok {
-				needBuild = true
-			} else {
-				var manifestIDs []string
-				if err := json.Unmarshal([]byte(manifestJSON), &manifestIDs); err != nil {
-					needBuild = true
-				} else if !StringSlicesEqual(manifestIDs, enabledIDs) {
-					fmt.Println("Agent config changed — run with --rebuild to update the image.")
-					return nil
-				}
-			}
-		}
+	needBase, needInstance, buildErr := determineBuilds(ctx, c, enabledIDs, containerName, flagRebuild)
+	if errors.Is(buildErr, ErrManifestMismatch) {
+		fmt.Println("Agent config changed — run with --rebuild to update the image.")
+		return nil
+	} else if buildErr != nil {
+		return fmt.Errorf("determining build requirements: %w", buildErr)
 	}
 
-	if needBuild {
+	if needBase {
 		// Check for UID/GID conflict in base image
 		strategy := dockerpkg.UserStrategyCreate
 		conflictingUser := ""
@@ -533,30 +556,62 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			}
 		}
 
-		b := dockerpkg.NewDockerfileBuilder(info, publicKey, hostKeyPriv, hostKeyPub, strategy, conflictingUser)
+		gitConfigContent := ""
+		if data, err := os.ReadFile(filepath.Join(info.HomeDir, ".gitconfig")); err == nil {
+			gitConfigContent = string(data)
+		}
+
+		baseBuilder := dockerpkg.NewBaseImageBuilder(info, strategy, conflictingUser, gitConfigContent)
 		for _, a := range enabledAgents {
-			a.Install(b)
+			a.Install(baseBuilder)
 		}
 		manifestJSON, _ := json.Marshal(enabledIDs)
-		b.Run(fmt.Sprintf("echo %q > %s", string(manifestJSON), constants.ManifestFilePath))
-		b.Finalize() // CMD must be last — after all agent RUN steps
-		labels["bac.manifest"] = string(manifestJSON)
+		baseBuilder.Run(fmt.Sprintf("echo %q > %s", string(manifestJSON), constants.ManifestFilePath))
 
-		spec := dockerpkg.ContainerSpec{
+		baseLabels := map[string]string{
+			"bac.managed":  "true",
+			"bac.manifest": string(manifestJSON),
+		}
+
+		baseSpec := dockerpkg.ContainerSpec{
 			Name:       containerName,
-			ImageTag:   imageTag,
-			Dockerfile: b.Build(),
-			Labels:     labels,
+			ImageTag:   constants.BaseImageTag,
+			Dockerfile: baseBuilder.Build(),
+			Labels:     baseLabels,
 			HostUID:    info.UID,
 			HostGID:    info.GID,
 			NoCache:    flagRebuild,
 		}
 
-		fmt.Println("Building image...")
-		buildOutput, err := dockerpkg.BuildImage(ctx, c, spec, flagVerbose)
+		fmt.Println("Building base image...")
+		buildOutput, err := dockerpkg.BuildImage(ctx, c, baseSpec, flagVerbose)
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildOutput)
-			return fmt.Errorf("image build failed: %w", err)
+			return fmt.Errorf("base image build failed: %w", err)
+		}
+
+		// Base was rebuilt, so instance must also be rebuilt.
+		needInstance = true
+	}
+
+	if needInstance {
+		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		instanceBuilder.Finalize()
+
+		instanceSpec := dockerpkg.ContainerSpec{
+			Name:       containerName,
+			ImageTag:   imageTag,
+			Dockerfile: instanceBuilder.Build(),
+			Labels:     labels,
+			HostUID:    info.UID,
+			HostGID:    info.GID,
+		}
+
+		fmt.Println("Building instance image...")
+		buildOutput, err := dockerpkg.BuildImage(ctx, c, instanceSpec, flagVerbose)
+		if err != nil {
+			fmt.Fprint(os.Stderr, buildOutput)
+			return fmt.Errorf("instance image build failed: %w", err)
 		}
 	}
 
@@ -592,18 +647,23 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		{HostPath: absPath, ContainerPath: constants.WorkspaceMountPath},
 	}
 	for _, s := range agentStatuses {
+		containerPath := s.a.ContainerMountPath(info.HomeDir)
+		if s.resolvedPath == "" || containerPath == "" {
+			continue // Agent has no credential store (e.g. build-resources)
+		}
 		mounts = append(mounts, dockerpkg.Mount{
 			HostPath:      s.resolvedPath,
-			ContainerPath: s.a.ContainerMountPath(info.HomeDir),
+			ContainerPath: containerPath,
 		})
 	}
 
 	spec := dockerpkg.ContainerSpec{
-		Name:     containerName,
-		ImageTag: imageTag,
-		Mounts:   mounts,
-		SSHPort:  sshPort,
-		Labels:   labels,
+		Name:          containerName,
+		ImageTag:      imageTag,
+		Mounts:        mounts,
+		SSHPort:       sshPort,
+		Labels:        labels,
+		RestartPolicy: flagDockerRestartPolicy,
 	}
 
 	if _, err := dockerpkg.CreateContainer(ctx, c, spec); err != nil {

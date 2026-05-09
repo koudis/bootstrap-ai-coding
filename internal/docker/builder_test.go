@@ -1,6 +1,7 @@
 package docker_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,25 +35,33 @@ func testInfo(uid, gid int) *hostinfo.Info {
 	}
 }
 
-// newCreateBuilder is a convenience helper that builds a DockerfileBuilder
-// using UserStrategyCreate with the given uid/gid and fixed key material.
+// newCreateBuilder is a convenience helper that builds a base image builder
+// using UserStrategyCreate with the given uid/gid.
 func newCreateBuilder(uid, gid int) *docker.DockerfileBuilder {
-	return docker.NewDockerfileBuilder(
+	return docker.NewBaseImageBuilder(
 		testInfo(uid, gid),
-		fixedPublicKey,
-		fixedHostKeyPriv, fixedHostKeyPub,
 		docker.UserStrategyCreate, "",
+		"",
 	)
 }
 
-// newRenameBuilder is a convenience helper that builds a DockerfileBuilder
+// newRenameBuilder is a convenience helper that builds a base image builder
 // using UserStrategyRename with the given uid/gid and conflicting user name.
 func newRenameBuilder(uid, gid int, conflictingUser string) *docker.DockerfileBuilder {
-	return docker.NewDockerfileBuilder(
+	return docker.NewBaseImageBuilder(
+		testInfo(uid, gid),
+		docker.UserStrategyRename, conflictingUser,
+		"",
+	)
+}
+
+// newInstanceBuilder is a convenience helper that builds an instance image builder
+// with the given uid/gid and fixed key material.
+func newInstanceBuilder(uid, gid int) *docker.DockerfileBuilder {
+	return docker.NewInstanceImageBuilder(
 		testInfo(uid, gid),
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
-		docker.UserStrategyRename, conflictingUser,
 	)
 }
 
@@ -118,22 +127,25 @@ func TestPropertyDockerfileSSHServerAndContainerUser(t *testing.T) {
 		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
 
 		b := newCreateBuilder(uid, gid)
-		b.Finalize() // CMD must be appended before inspecting the full Dockerfile
 		content := b.Build()
 
-		// Must install openssh-server
+		// Must install openssh-server (base layer)
 		require.Contains(t, content, "openssh-server",
 			"Dockerfile must install openssh-server")
 
-		// Must reference ContainerUser
+		// Must reference ContainerUser (base layer)
 		require.Contains(t, content, "testuser",
 			"Dockerfile must reference ContainerUser %q", "testuser")
 
-		// Must start sshd as the CMD
-		require.Contains(t, content, "/usr/sbin/sshd",
-			"Dockerfile must include sshd CMD")
-		require.Contains(t, content, `CMD ["/usr/sbin/sshd", "-D"]`,
-			"Dockerfile must have CMD [\"/usr/sbin/sshd\", \"-D\"]")
+		// CMD is in the instance layer — verify it there
+		ib := newInstanceBuilder(uid, gid)
+		ib.Finalize()
+		instanceContent := ib.Build()
+
+		require.Contains(t, instanceContent, "/usr/sbin/sshd",
+			"Instance Dockerfile must include sshd CMD")
+		require.Contains(t, instanceContent, `CMD ["/usr/sbin/sshd", "-D"]`,
+			"Instance Dockerfile must have CMD [\"/usr/sbin/sshd\", \"-D\"]")
 	})
 }
 
@@ -351,11 +363,11 @@ func TestPropertySSHDConfigPasswordAuthDisabled_Create(t *testing.T) {
 		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
 		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
 
-		b := newCreateBuilder(uid, gid)
+		b := newInstanceBuilder(uid, gid)
 		content := b.Build()
 
 		require.Contains(t, content, "PasswordAuthentication no",
-			"Dockerfile must set PasswordAuthentication no in sshd_config")
+			"Instance Dockerfile must set PasswordAuthentication no in sshd_config")
 	})
 }
 
@@ -364,13 +376,12 @@ func TestPropertySSHDConfigPasswordAuthDisabled_Rename(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
 		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
-		conflictingUser := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "conflictingUser")
 
-		b := newRenameBuilder(uid, gid, conflictingUser)
+		b := newInstanceBuilder(uid, gid)
 		content := b.Build()
 
 		require.Contains(t, content, "PasswordAuthentication no",
-			"Dockerfile must set PasswordAuthentication no in sshd_config")
+			"Instance Dockerfile must set PasswordAuthentication no in sshd_config")
 	})
 }
 
@@ -387,17 +398,16 @@ func TestPropertyPublicKeyInjected_Create(t *testing.T) {
 		keyBody := rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "keyBody")
 		publicKey := "ssh-ed25519 " + keyBody + " test@host"
 
-		b := docker.NewDockerfileBuilder(
+		b := docker.NewInstanceImageBuilder(
 			testInfo(uid, gid),
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
-			docker.UserStrategyCreate, "",
 		)
 		content := b.Build()
 
 		authorizedKeysPath := "/home/testuser/.ssh/authorized_keys"
 		require.Contains(t, content, authorizedKeysPath,
-			"Dockerfile must reference authorized_keys path %q", authorizedKeysPath)
+			"Instance Dockerfile must reference authorized_keys path %q", authorizedKeysPath)
 	})
 }
 
@@ -406,21 +416,19 @@ func TestPropertyPublicKeyInjected_Rename(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
 		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
-		conflictingUser := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "conflictingUser")
 		keyBody := rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "keyBody")
 		publicKey := "ssh-ed25519 " + keyBody + " test@host"
 
-		b := docker.NewDockerfileBuilder(
+		b := docker.NewInstanceImageBuilder(
 			testInfo(uid, gid),
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
-			docker.UserStrategyRename, conflictingUser,
 		)
 		content := b.Build()
 
 		authorizedKeysPath := "/home/testuser/.ssh/authorized_keys"
 		require.Contains(t, content, authorizedKeysPath,
-			"Dockerfile must reference authorized_keys path %q", authorizedKeysPath)
+			"Instance Dockerfile must reference authorized_keys path %q", authorizedKeysPath)
 	})
 }
 
@@ -438,11 +446,10 @@ func TestPropertySSHHostKeyInjected_Create(t *testing.T) {
 		hostKeyPriv := "-----BEGIN OPENSSH PRIVATE KEY-----\n" + privKeyBody + "\n-----END OPENSSH PRIVATE KEY-----"
 		hostKeyPub := "ssh-ed25519 " + pubKeyBody + " host"
 
-		b := docker.NewDockerfileBuilder(
+		b := docker.NewInstanceImageBuilder(
 			testInfo(uid, gid),
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
-			docker.UserStrategyCreate, "",
 		)
 		content := b.Build()
 
@@ -450,9 +457,9 @@ func TestPropertySSHHostKeyInjected_Create(t *testing.T) {
 		privPath := fmt.Sprintf("/etc/ssh/ssh_host_%s_key", constants.SSHHostKeyType)
 		pubPath := privPath + ".pub"
 		require.Contains(t, content, privPath,
-			"Dockerfile must inject host private key to %q", privPath)
+			"Instance Dockerfile must inject host private key to %q", privPath)
 		require.Contains(t, content, pubPath,
-			"Dockerfile must inject host public key to %q", pubPath)
+			"Instance Dockerfile must inject host public key to %q", pubPath)
 	})
 }
 
@@ -461,26 +468,24 @@ func TestPropertySSHHostKeyInjected_Rename(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
 		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
-		conflictingUser := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "conflictingUser")
 		privKeyBody := rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "privKeyBody")
 		pubKeyBody := rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "pubKeyBody")
 		hostKeyPriv := "-----BEGIN OPENSSH PRIVATE KEY-----\n" + privKeyBody + "\n-----END OPENSSH PRIVATE KEY-----"
 		hostKeyPub := "ssh-ed25519 " + pubKeyBody + " host"
 
-		b := docker.NewDockerfileBuilder(
+		b := docker.NewInstanceImageBuilder(
 			testInfo(uid, gid),
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
-			docker.UserStrategyRename, conflictingUser,
 		)
 		content := b.Build()
 
 		privPath := fmt.Sprintf("/etc/ssh/ssh_host_%s_key", constants.SSHHostKeyType)
 		pubPath := privPath + ".pub"
 		require.Contains(t, content, privPath,
-			"Dockerfile must inject host private key to %q", privPath)
+			"Instance Dockerfile must inject host private key to %q", privPath)
 		require.Contains(t, content, pubPath,
-			"Dockerfile must inject host public key to %q", pubPath)
+			"Instance Dockerfile must inject host public key to %q", pubPath)
 	})
 }
 
@@ -850,33 +855,34 @@ func TestPropertyDockerfileSSHAndUserForAnyUsername(t *testing.T) {
 			GID:      gid,
 		}
 
-		// 5. Build a Dockerfile
-		b := docker.NewDockerfileBuilder(
+		// 5. Build a base image Dockerfile
+		b := docker.NewBaseImageBuilder(
 			info,
-			fixedPublicKey,
-			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyCreate, "",
+			"",
 		)
-		b.Finalize()
 		content := b.Build()
 
-		// Assert: openssh-server installation
+		// Assert: openssh-server installation (base layer)
 		require.Contains(t, content, "openssh-server",
-			"Dockerfile must install openssh-server")
+			"Base Dockerfile must install openssh-server")
 
-		// Assert: The drawn username in useradd with correct UID/GID
+		// Assert: The drawn username in useradd with correct UID/GID (base layer)
 		expectedUseradd := fmt.Sprintf("useradd --uid %d --gid %d --create-home --shell /bin/bash %s", uid, gid, username)
 		require.Contains(t, content, expectedUseradd,
-			"Dockerfile must contain useradd with username %q, uid %d, gid %d", username, uid, gid)
+			"Base Dockerfile must contain useradd with username %q, uid %d, gid %d", username, uid, gid)
 
-		// Assert: sshd CMD
-		require.Contains(t, content, `CMD ["/usr/sbin/sshd", "-D"]`,
-			"Dockerfile must have CMD [\"/usr/sbin/sshd\", \"-D\"]")
-
-		// Assert: The drawn username in sudoers with NOPASSWD
+		// Assert: The drawn username in sudoers with NOPASSWD (base layer)
 		sudoersEntry := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", username)
 		require.Contains(t, content, sudoersEntry,
-			"Dockerfile must contain sudoers entry for username %q with NOPASSWD", username)
+			"Base Dockerfile must contain sudoers entry for username %q with NOPASSWD", username)
+
+		// Assert: sshd CMD is in the instance layer
+		ib := docker.NewInstanceImageBuilder(info, fixedPublicKey, fixedHostKeyPriv, fixedHostKeyPub)
+		ib.Finalize()
+		instanceContent := ib.Build()
+		require.Contains(t, instanceContent, `CMD ["/usr/sbin/sshd", "-D"]`,
+			"Instance Dockerfile must have CMD [\"/usr/sbin/sshd\", \"-D\"]")
 	})
 }
 
@@ -904,40 +910,43 @@ func TestPropertyDockerfileUsesRuntimeUsernameAndHomeDir(t *testing.T) {
 			GID:      gid,
 		}
 
-		// Build a Dockerfile using NewDockerfileBuilder
-		b := docker.NewDockerfileBuilder(
+		// Build a base image Dockerfile
+		baseBuilder := docker.NewBaseImageBuilder(
 			info,
-			fixedPublicKey,
-			fixedHostKeyPriv, fixedHostKeyPub,
 			docker.UserStrategyCreate, "",
+			"",
 		)
-		content := b.Build()
+		baseContent := baseBuilder.Build()
 
-		// Assert the Dockerfile contains the drawn username in useradd
-		require.Contains(t, content, "useradd",
-			"Dockerfile must contain useradd")
-		require.Contains(t, content, fmt.Sprintf("useradd --uid %d --gid %d --create-home --shell /bin/bash %s", uid, gid, username),
+		// Assert the base Dockerfile contains the drawn username in useradd
+		require.Contains(t, baseContent, "useradd",
+			"Base Dockerfile must contain useradd")
+		require.Contains(t, baseContent, fmt.Sprintf("useradd --uid %d --gid %d --create-home --shell /bin/bash %s", uid, gid, username),
 			"useradd must reference the drawn username %q", username)
 
-		// Assert the Dockerfile contains the drawn username in sudoers
+		// Assert the base Dockerfile contains the drawn username in sudoers
 		sudoersLine := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", username)
-		require.Contains(t, content, sudoersLine,
+		require.Contains(t, baseContent, sudoersLine,
 			"sudoers must reference the drawn username %q", username)
 
-		// Assert the Dockerfile contains the drawn username in chown
+		// Build an instance image Dockerfile
+		instanceBuilder := docker.NewInstanceImageBuilder(info, fixedPublicKey, fixedHostKeyPriv, fixedHostKeyPub)
+		instanceContent := instanceBuilder.Build()
+
+		// Assert the instance Dockerfile contains the drawn username in chown
 		chownFragment := fmt.Sprintf("chown -R %s:%s", username, username)
-		require.Contains(t, content, chownFragment,
+		require.Contains(t, instanceContent, chownFragment,
 			"chown must reference the drawn username %q", username)
 
-		// Assert the Dockerfile contains the drawn home directory in authorized_keys path
+		// Assert the instance Dockerfile contains the drawn home directory in authorized_keys path
 		authorizedKeysPath := homeDir + "/.ssh/authorized_keys"
-		require.Contains(t, content, authorizedKeysPath,
-			"Dockerfile must reference authorized_keys at %q", authorizedKeysPath)
+		require.Contains(t, instanceContent, authorizedKeysPath,
+			"Instance Dockerfile must reference authorized_keys at %q", authorizedKeysPath)
 
-		// If the username is NOT "dev", assert the Dockerfile does NOT contain "dev"
+		// If the username is NOT "dev", assert the Dockerfiles do NOT contain "dev"
 		// as a standalone username reference in useradd/sudoers lines
 		if username != "dev" {
-			for _, line := range strings.Split(content, "\n") {
+			for _, line := range strings.Split(baseContent, "\n") {
 				if strings.Contains(line, "useradd") {
 					require.NotContains(t, line, " dev",
 						"useradd line must not contain hardcoded 'dev' when username is %q", username)
@@ -949,10 +958,503 @@ func TestPropertyDockerfileUsesRuntimeUsernameAndHomeDir(t *testing.T) {
 			}
 		}
 
-		// If the home directory is NOT "/home/dev", assert the Dockerfile does NOT contain "/home/dev"
+		// If the home directory is NOT "/home/dev", assert the Dockerfiles do NOT contain "/home/dev"
 		if homeDir != "/home/dev" {
-			require.NotContains(t, content, "/home/dev",
-				"Dockerfile must not contain hardcoded '/home/dev' when homeDir is %q", homeDir)
+			require.NotContains(t, baseContent, "/home/dev",
+				"Base Dockerfile must not contain hardcoded '/home/dev' when homeDir is %q", homeDir)
+			require.NotContains(t, instanceContent, "/home/dev",
+				"Instance Dockerfile must not contain hardcoded '/home/dev' when homeDir is %q", homeDir)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for git config injection (Req 24)
+// ---------------------------------------------------------------------------
+
+// TestGitConfigInjection_SpecialCharacters verifies that git config content
+// containing special characters (double quotes, single quotes, backslashes,
+// dollar signs, backticks, newlines) is correctly handled via base64 encoding
+// in the generated Dockerfile.
+// Validates: Req 24
+func TestGitConfigInjection_SpecialCharacters(t *testing.T) {
+	// Content with characters that would break shell escaping if not base64-encoded.
+	gitConfigContent := "[alias]\n\tci = commit -m \"WIP\"\n\tco = checkout\n[user]\n\tname = O'Brien\n\temail = user@example.com\n[core]\n\tpath = ~/path with spaces/$HOME/`echo hi`\\\n"
+	expectedBase64 := base64.StdEncoding.EncodeToString([]byte(gitConfigContent))
+
+	info := &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      1000,
+		GID:      1000,
+	}
+
+	b := docker.NewBaseImageBuilder(
+		info,
+		docker.UserStrategyCreate, "",
+		gitConfigContent,
+	)
+	content := b.Build()
+
+	// The RUN line must contain the correct base64-encoded version of the special content.
+	require.Contains(t, content, fmt.Sprintf("echo %s | base64 -d > /home/testuser/.gitconfig", expectedBase64),
+		"Dockerfile must contain base64-encoded git config with special characters")
+
+	// Decode the base64 from the generated Dockerfile and verify it matches the original content.
+	decoded, err := base64.StdEncoding.DecodeString(expectedBase64)
+	require.NoError(t, err, "base64 decoding must succeed")
+	require.Equal(t, gitConfigContent, string(decoded),
+		"decoded base64 must match the original git config content with special characters")
+
+	// Verify chown and chmod are present.
+	require.Contains(t, content, "chown testuser:testuser /home/testuser/.gitconfig",
+		"Dockerfile must contain chown for .gitconfig")
+	require.Contains(t, content, "chmod 0444 /home/testuser/.gitconfig",
+		"Dockerfile must contain chmod 0444 for .gitconfig")
+}
+
+// TestGitConfigInjection_NonEmpty verifies that when non-empty git config
+// content is passed to NewBaseImageBuilder, the generated Dockerfile contains
+// a RUN line that pipes base64-encoded content to <homeDir>/.gitconfig with
+// correct chown and chmod 0444.
+// Validates: Req 24
+func TestGitConfigInjection_NonEmpty(t *testing.T) {
+	gitConfigContent := "[user]\n\tname = Test User\n\temail = test@example.com\n"
+	expectedBase64 := base64.StdEncoding.EncodeToString([]byte(gitConfigContent))
+
+	info := &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      1000,
+		GID:      1000,
+	}
+
+	b := docker.NewBaseImageBuilder(
+		info,
+		docker.UserStrategyCreate, "",
+		gitConfigContent,
+	)
+	content := b.Build()
+
+	// The RUN line must pipe base64-encoded content through base64 -d to write to <homeDir>/.gitconfig
+	require.Contains(t, content, fmt.Sprintf("echo %s | base64 -d > /home/testuser/.gitconfig", expectedBase64),
+		"Dockerfile must contain base64 decode pipeline writing to /home/testuser/.gitconfig")
+
+	// The RUN line must contain chown <username>:<username> <homeDir>/.gitconfig
+	require.Contains(t, content, "chown testuser:testuser /home/testuser/.gitconfig",
+		"Dockerfile must contain chown testuser:testuser /home/testuser/.gitconfig")
+
+	// The RUN line must contain chmod 0444 <homeDir>/.gitconfig
+	require.Contains(t, content, "chmod 0444 /home/testuser/.gitconfig",
+		"Dockerfile must contain chmod 0444 /home/testuser/.gitconfig")
+}
+
+// TestGitConfigInjection_Empty verifies that when an empty string is passed
+// for the gitConfig parameter, the generated Dockerfile does NOT contain any
+// .gitconfig-related RUN line.
+// Validates: Req 24
+func TestGitConfigInjection_Empty(t *testing.T) {
+	info := &hostinfo.Info{
+		Username: "testuser",
+		HomeDir:  "/home/testuser",
+		UID:      1000,
+		GID:      1000,
+	}
+
+	b := docker.NewBaseImageBuilder(
+		info,
+		docker.UserStrategyCreate, "",
+		"",
+	)
+	content := b.Build()
+
+	// No .gitconfig injection should appear when gitConfig is empty
+	require.NotContains(t, content, ".gitconfig",
+		"Dockerfile must NOT contain .gitconfig when gitConfig parameter is empty")
+}
+
+// ---------------------------------------------------------------------------
+// RunAsUser tests
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Unit tests for NewBaseImageBuilder output (Task 8: TL-1, TL-2)
+// ---------------------------------------------------------------------------
+
+// TestBaseImageBuilderOutput_StartsWithFROM verifies that the base image
+// Dockerfile starts with FROM constants.BaseContainerImage.
+func TestBaseImageBuilderOutput_StartsWithFROM(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	lines := b.Lines()
+	require.NotEmpty(t, lines)
+	require.Equal(t, "FROM "+constants.BaseContainerImage, lines[0],
+		"base image Dockerfile must start with FROM %s", constants.BaseContainerImage)
+}
+
+// TestBaseImageBuilderOutput_ContainsUseradd verifies that UserStrategyCreate
+// produces a Dockerfile containing useradd.
+func TestBaseImageBuilderOutput_ContainsUseradd(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	content := b.Build()
+	require.Contains(t, content, "useradd",
+		"base image Dockerfile with UserStrategyCreate must contain useradd")
+}
+
+// TestBaseImageBuilderOutput_ContainsUsermod verifies that UserStrategyRename
+// produces a Dockerfile containing usermod.
+func TestBaseImageBuilderOutput_ContainsUsermod(t *testing.T) {
+	b := newRenameBuilder(1000, 1000, "ubuntu")
+	content := b.Build()
+	require.Contains(t, content, "usermod",
+		"base image Dockerfile with UserStrategyRename must contain usermod")
+}
+
+// TestBaseImageBuilderOutput_ContainsGnomeKeyring verifies that the base image
+// Dockerfile installs gnome-keyring for D-Bus + keyring setup.
+func TestBaseImageBuilderOutput_ContainsGnomeKeyring(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	content := b.Build()
+	require.Contains(t, content, "gnome-keyring",
+		"base image Dockerfile must contain gnome-keyring")
+}
+
+// TestBaseImageBuilderOutput_DoesNotContainSSHHostKey verifies that the base
+// image Dockerfile does NOT contain SSH host key content (ssh_host_ed25519_key).
+// SSH host keys belong in the instance layer only.
+func TestBaseImageBuilderOutput_DoesNotContainSSHHostKey(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	content := b.Build()
+	require.NotContains(t, content, "ssh_host_ed25519_key",
+		"base image Dockerfile must NOT contain ssh_host_ed25519_key (belongs in instance layer)")
+}
+
+// TestBaseImageBuilderOutput_DoesNotContainAuthorizedKeys verifies that the
+// base image Dockerfile does NOT contain authorized_keys.
+// authorized_keys belongs in the instance layer only.
+func TestBaseImageBuilderOutput_DoesNotContainAuthorizedKeys(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	content := b.Build()
+	require.NotContains(t, content, "authorized_keys",
+		"base image Dockerfile must NOT contain authorized_keys (belongs in instance layer)")
+}
+
+// TestBaseImageBuilderOutput_DoesNotContainSshdConfig verifies that the base
+// image Dockerfile does NOT contain sshd_config hardening (PasswordAuthentication no).
+// sshd_config hardening belongs in the instance layer only.
+func TestBaseImageBuilderOutput_DoesNotContainSshdConfig(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	content := b.Build()
+	require.NotContains(t, content, "PasswordAuthentication no",
+		"base image Dockerfile must NOT contain 'PasswordAuthentication no' (belongs in instance layer)")
+}
+
+// TestBaseImageBuilderOutput_DoesNotContainCMD verifies that the base image
+// Dockerfile does NOT contain a CMD instruction. CMD belongs in the instance
+// layer only (appended via Finalize()).
+func TestBaseImageBuilderOutput_DoesNotContainCMD(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	content := b.Build()
+	require.NotContains(t, content, "CMD",
+		"base image Dockerfile must NOT contain CMD (belongs in instance layer)")
+}
+
+// TestBaseImageBuilderOutput_RenameDoesNotContainInstanceContent verifies that
+// the base image Dockerfile with UserStrategyRename also does NOT contain
+// instance-layer content (SSH host key, authorized_keys, sshd_config, CMD).
+func TestBaseImageBuilderOutput_RenameDoesNotContainInstanceContent(t *testing.T) {
+	b := newRenameBuilder(1000, 1000, "ubuntu")
+	content := b.Build()
+
+	require.NotContains(t, content, "ssh_host_ed25519_key",
+		"base image (rename) must NOT contain ssh_host_ed25519_key")
+	require.NotContains(t, content, "authorized_keys",
+		"base image (rename) must NOT contain authorized_keys")
+	require.NotContains(t, content, "PasswordAuthentication no",
+		"base image (rename) must NOT contain 'PasswordAuthentication no'")
+	require.NotContains(t, content, "CMD",
+		"base image (rename) must NOT contain CMD")
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for NewInstanceImageBuilder output (Task 8: TL-1, TL-2)
+// ---------------------------------------------------------------------------
+
+// TestInstanceImageBuilderOutput_StartsWithFROM verifies that the instance
+// image Dockerfile starts with FROM bac-base:latest (constants.BaseImageTag).
+func TestInstanceImageBuilderOutput_StartsWithFROM(t *testing.T) {
+	b := newInstanceBuilder(1000, 1000)
+	lines := b.Lines()
+	require.NotEmpty(t, lines)
+	require.Equal(t, "FROM "+constants.BaseImageTag, lines[0],
+		"instance image Dockerfile must start with FROM %s", constants.BaseImageTag)
+}
+
+// TestInstanceImageBuilderOutput_ContainsSSHHostKeyInjection verifies that the
+// instance image Dockerfile contains SSH host key injection (references to
+// ssh_host_ed25519_key).
+func TestInstanceImageBuilderOutput_ContainsSSHHostKeyInjection(t *testing.T) {
+	b := newInstanceBuilder(1000, 1000)
+	content := b.Build()
+
+	privPath := fmt.Sprintf("/etc/ssh/ssh_host_%s_key", constants.SSHHostKeyType)
+	pubPath := privPath + ".pub"
+	require.Contains(t, content, privPath,
+		"instance image Dockerfile must contain SSH host private key path %q", privPath)
+	require.Contains(t, content, pubPath,
+		"instance image Dockerfile must contain SSH host public key path %q", pubPath)
+}
+
+// TestInstanceImageBuilderOutput_ContainsAuthorizedKeys verifies that the
+// instance image Dockerfile contains authorized_keys setup.
+func TestInstanceImageBuilderOutput_ContainsAuthorizedKeys(t *testing.T) {
+	b := newInstanceBuilder(1000, 1000)
+	content := b.Build()
+	require.Contains(t, content, "authorized_keys",
+		"instance image Dockerfile must contain authorized_keys")
+}
+
+// TestInstanceImageBuilderOutput_ContainsSshdConfigHardening verifies that the
+// instance image Dockerfile contains sshd_config hardening directives:
+// PasswordAuthentication no and PermitRootLogin no.
+func TestInstanceImageBuilderOutput_ContainsSshdConfigHardening(t *testing.T) {
+	b := newInstanceBuilder(1000, 1000)
+	content := b.Build()
+	require.Contains(t, content, "PasswordAuthentication no",
+		"instance image Dockerfile must contain 'PasswordAuthentication no'")
+	require.Contains(t, content, "PermitRootLogin no",
+		"instance image Dockerfile must contain 'PermitRootLogin no'")
+}
+
+// TestInstanceImageBuilderOutput_EndsWithCMDAfterFinalize verifies that after
+// calling Finalize(), the instance image Dockerfile ends with the sshd CMD.
+func TestInstanceImageBuilderOutput_EndsWithCMDAfterFinalize(t *testing.T) {
+	b := newInstanceBuilder(1000, 1000)
+	b.Finalize()
+	lines := b.Lines()
+	require.NotEmpty(t, lines)
+	lastLine := lines[len(lines)-1]
+	require.Equal(t, `CMD ["/usr/sbin/sshd", "-D"]`, lastLine,
+		"instance image Dockerfile must end with CMD [\"/usr/sbin/sshd\", \"-D\"] after Finalize()")
+}
+
+// ---------------------------------------------------------------------------
+// RunAsUser tests
+// ---------------------------------------------------------------------------
+
+// TestRunAsUserEmitsCorrectSequence verifies that RunAsUser emits
+// USER <username>, RUN <cmd>, USER root in the correct order.
+func TestRunAsUserEmitsCorrectSequence(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	linesBefore := len(b.Lines())
+
+	b.RunAsUser("curl -LsSf https://astral.sh/uv/install.sh | sh")
+
+	lines := b.Lines()
+	require.Equal(t, linesBefore+3, len(lines),
+		"RunAsUser must append exactly 3 lines")
+
+	require.Equal(t, "USER testuser", lines[linesBefore],
+		"first line must be USER <username>")
+	require.Equal(t, "RUN curl -LsSf https://astral.sh/uv/install.sh | sh", lines[linesBefore+1],
+		"second line must be RUN <cmd>")
+	require.Equal(t, "USER root", lines[linesBefore+2],
+		"third line must be USER root")
+}
+
+// ---------------------------------------------------------------------------
+// Two-Layer Image Architecture Property Tests (Task 10: TL-1, TL-2, TL-11)
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property TL-1: Base image Dockerfile always starts with FROM constants.BaseContainerImage for any valid hostinfo
+// Validates: Requirements TL-1.1
+func TestPropertyTwoLayer_BaseImageStartsWithFROM(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// Draw random valid hostinfo inputs
+		username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "username")
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+		homeDir := "/home/" + username
+
+		info := &hostinfo.Info{
+			Username: username,
+			HomeDir:  homeDir,
+			UID:      uid,
+			GID:      gid,
+		}
+
+		// Test with UserStrategyCreate
+		b := docker.NewBaseImageBuilder(info, docker.UserStrategyCreate, "", "")
+		lines := b.Lines()
+
+		wantFrom := "FROM " + constants.BaseContainerImage
+		require.NotEmpty(t, lines, "Dockerfile must have at least one line")
+		require.Equal(t, wantFrom, lines[0],
+			"base image Dockerfile must start with FROM %s for username=%q uid=%d gid=%d",
+			constants.BaseContainerImage, username, uid, gid)
+
+		// No other FROM instruction should exist
+		for i, line := range lines[1:] {
+			require.False(t, strings.HasPrefix(line, "FROM "),
+				"unexpected second FROM at line %d: %q", i+1, line)
+		}
+	})
+}
+
+// Feature: bootstrap-ai-coding, Property TL-2: Instance image Dockerfile always starts with FROM bac-base:latest for any valid inputs
+// Validates: Requirements TL-2.1
+func TestPropertyTwoLayer_InstanceImageStartsWithFROM(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// Draw random valid hostinfo inputs
+		username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "username")
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+		homeDir := "/home/" + username
+
+		// Draw random SSH key material
+		publicKey := "ssh-ed25519 " + rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "pubKeyBody") + " test@host"
+		hostKeyPriv := "-----BEGIN OPENSSH PRIVATE KEY-----\n" + rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "privKeyBody") + "\n-----END OPENSSH PRIVATE KEY-----"
+		hostKeyPub := "ssh-ed25519 " + rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "hostPubBody") + " host"
+
+		info := &hostinfo.Info{
+			Username: username,
+			HomeDir:  homeDir,
+			UID:      uid,
+			GID:      gid,
+		}
+
+		b := docker.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		lines := b.Lines()
+
+		wantFrom := "FROM " + constants.BaseImageName + ":latest"
+		require.NotEmpty(t, lines, "Dockerfile must have at least one line")
+		require.Equal(t, wantFrom, lines[0],
+			"instance image Dockerfile must start with FROM %s for username=%q",
+			constants.BaseImageName+":latest", username)
+
+		// No other FROM instruction should exist
+		for i, line := range lines[1:] {
+			require.False(t, strings.HasPrefix(line, "FROM "),
+				"unexpected second FROM at line %d: %q", i+1, line)
+		}
+	})
+}
+
+// Feature: bootstrap-ai-coding, Property TL-3: Base image Dockerfile never contains CMD or SSH host key content
+// Validates: Requirements TL-1.10
+func TestPropertyTwoLayer_BaseImageNeverContainsCMDOrHostKey(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// Draw random valid hostinfo inputs
+		username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "username")
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+		homeDir := "/home/" + username
+
+		info := &hostinfo.Info{
+			Username: username,
+			HomeDir:  homeDir,
+			UID:      uid,
+			GID:      gid,
+		}
+
+		// Test with both strategies
+		strategy := docker.UserStrategyCreate
+		conflictingUser := ""
+		if rapid.Bool().Draw(t, "useRename") {
+			strategy = docker.UserStrategyRename
+			conflictingUser = rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "conflictingUser")
+		}
+
+		b := docker.NewBaseImageBuilder(info, strategy, conflictingUser, "")
+		content := b.Build()
+
+		// Base image must NOT contain CMD
+		require.NotContains(t, content, "CMD",
+			"base image Dockerfile must never contain CMD (belongs in instance layer)")
+
+		// Base image must NOT contain SSH host key paths
+		hostKeyPath := fmt.Sprintf("ssh_host_%s_key", constants.SSHHostKeyType)
+		require.NotContains(t, content, hostKeyPath,
+			"base image Dockerfile must never contain SSH host key path %q", hostKeyPath)
+
+		// Base image must NOT contain authorized_keys
+		require.NotContains(t, content, "authorized_keys",
+			"base image Dockerfile must never contain authorized_keys (belongs in instance layer)")
+	})
+}
+
+// Feature: bootstrap-ai-coding, Property TL-4: Instance image Dockerfile always ends with CMD after Finalize()
+// Validates: Requirements TL-2.6
+func TestPropertyTwoLayer_InstanceImageEndsWithCMDAfterFinalize(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		// Draw random valid hostinfo inputs
+		username := rapid.StringMatching(`[a-z][a-z0-9_-]{0,15}`).Draw(t, "username")
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+		homeDir := "/home/" + username
+
+		// Draw random SSH key material
+		publicKey := "ssh-ed25519 " + rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "pubKeyBody") + " test@host"
+		hostKeyPriv := "-----BEGIN OPENSSH PRIVATE KEY-----\n" + rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "privKeyBody") + "\n-----END OPENSSH PRIVATE KEY-----"
+		hostKeyPub := "ssh-ed25519 " + rapid.StringMatching(`[A-Za-z0-9+/]{20,60}`).Draw(t, "hostPubBody") + " host"
+
+		info := &hostinfo.Info{
+			Username: username,
+			HomeDir:  homeDir,
+			UID:      uid,
+			GID:      gid,
+		}
+
+		b := docker.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		b.Finalize()
+		lines := b.Lines()
+
+		require.NotEmpty(t, lines, "Dockerfile must have at least one line")
+		lastLine := lines[len(lines)-1]
+		require.Equal(t, `CMD ["/usr/sbin/sshd", "-D"]`, lastLine,
+			"instance image Dockerfile must end with CMD [\"/usr/sbin/sshd\", \"-D\"] after Finalize() for username=%q",
+			username)
+	})
+}
+
+// Feature: bootstrap-ai-coding, Property TL-5: constants.BaseImageName + ":latest" equals "bac-base:latest"
+// Validates: Requirements TL-11
+func TestPropertyTwoLayer_BaseImageNameConstant(t *testing.T) {
+	// This is a constant-level property — no random inputs needed, but we
+	// verify it holds as a property test to document the invariant.
+	rapid.Check(t, func(t *rapid.T) {
+		// The property holds regardless of any input — draw a dummy to satisfy rapid
+		_ = rapid.IntRange(0, 100).Draw(t, "dummy")
+
+		require.Equal(t, "bac-base", constants.BaseImageName,
+			"constants.BaseImageName must equal \"bac-base\"")
+		require.Equal(t, "bac-base:latest", constants.BaseImageName+":latest",
+			"constants.BaseImageName + \":latest\" must equal \"bac-base:latest\"")
+		require.Equal(t, "bac-base:latest", constants.BaseImageTag,
+			"constants.BaseImageTag must equal \"bac-base:latest\"")
+	})
+}
+
+// TestRunAsUserUsesInfoUsername verifies that RunAsUser uses the username
+// from the builder's hostinfo.Info, not a hardcoded value.
+func TestRunAsUserUsesInfoUsername(t *testing.T) {
+	info := &hostinfo.Info{
+		Username: "alice",
+		HomeDir:  "/home/alice",
+		UID:      1001,
+		GID:      1001,
+	}
+	b := docker.NewBaseImageBuilder(
+		info,
+		docker.UserStrategyCreate, "",
+		"",
+	)
+	linesBefore := len(b.Lines())
+
+	b.RunAsUser("echo hello")
+
+	lines := b.Lines()
+	require.Equal(t, "USER alice", lines[linesBefore],
+		"RunAsUser must use the username from hostinfo.Info")
+	require.Equal(t, "USER root", lines[linesBefore+2],
+		"RunAsUser must switch back to root")
 }

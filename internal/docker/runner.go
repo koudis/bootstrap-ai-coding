@@ -32,15 +32,16 @@ type Mount struct {
 
 // ContainerSpec is the fully resolved specification for a container.
 type ContainerSpec struct {
-	Name       string            // Deterministic container name (bac-<12hex>)
-	ImageTag   string            // Docker image tag (derived from container name)
-	Dockerfile string            // Complete Dockerfile content (assembled by DockerfileBuilder)
-	Mounts     []Mount           // All bind mounts: /workspace + per-agent credential stores
-	SSHPort    int               // Host-side TCP port mapped to container port 22
-	Labels     map[string]string // Docker labels for identification
-	HostUID    int               // Host user UID (passed as build arg for dev user)
-	HostGID    int               // Host user GID (passed as build arg for dev user)
-	NoCache    bool              // When true, disable Docker layer cache during image build
+	Name          string            // Deterministic container name (bac-<12hex>)
+	ImageTag      string            // Docker image tag (derived from container name)
+	Dockerfile    string            // Complete Dockerfile content (assembled by DockerfileBuilder)
+	Mounts        []Mount           // All bind mounts: /workspace + per-agent credential stores
+	SSHPort       int               // Host-side TCP port mapped to container port 22
+	Labels        map[string]string // Docker labels for identification
+	HostUID       int               // Host user UID (passed as build arg for dev user)
+	HostGID       int               // Host user GID (passed as build arg for dev user)
+	NoCache       bool              // When true, disable Docker layer cache during image build
+	RestartPolicy string            // Docker restart policy (e.g. "unless-stopped"); empty means use default
 }
 
 func buildContextFromDockerfile(dockerfile string) (io.Reader, error) {
@@ -150,6 +151,15 @@ func BuildImage(ctx context.Context, c *Client, spec ContainerSpec, verbose bool
 	return BuildImageWithTimeout(ctx, c, spec, constants.ImageBuildTimeout, verbose)
 }
 
+// ResolveRestartPolicy returns the effective restart policy for a ContainerSpec.
+// If the spec's RestartPolicy is empty, it returns constants.DefaultRestartPolicy.
+func ResolveRestartPolicy(spec ContainerSpec) string {
+	if spec.RestartPolicy == "" {
+		return constants.DefaultRestartPolicy
+	}
+	return spec.RestartPolicy
+}
+
 // CreateContainer creates a container from the given spec.
 func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string, error) {
 	sshPort := nat.Port(fmt.Sprintf("%d/tcp", constants.ContainerSSHPort))
@@ -170,6 +180,8 @@ func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string
 		})
 	}
 
+	restartPolicy := ResolveRestartPolicy(spec)
+
 	resp, err := c.ContainerCreate(
 		ctx,
 		&container.Config{
@@ -179,8 +191,9 @@ func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string
 			ExposedPorts: exposedPorts,
 		},
 		&container.HostConfig{
-			PortBindings: portBindings,
-			Mounts:       mounts,
+			PortBindings:  portBindings,
+			Mounts:        mounts,
+			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restartPolicy)},
 		},
 		nil,
 		nil,

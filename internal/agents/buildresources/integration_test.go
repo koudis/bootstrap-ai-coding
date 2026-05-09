@@ -1,6 +1,6 @@
 //go:build integration
 
-package claude_test
+package buildresources_test
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/agent"
-	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
 	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
@@ -62,7 +62,7 @@ func TestMain(m *testing.M) {
 func setupSharedContainer() error {
 	ctx := context.Background()
 
-	projectDir, err := os.MkdirTemp("", "bac-claude-integration-*")
+	projectDir, err := os.MkdirTemp("", "bac-buildresources-integration-*")
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
@@ -105,18 +105,18 @@ func setupSharedContainer() error {
 		"",
 	)
 
-	claudeAgent, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	brAgent, err := agent.Lookup(constants.BuildResourcesAgentName)
 	if err != nil {
-		return fmt.Errorf("looking up claude agent: %w", err)
+		return fmt.Errorf("looking up build-resources agent: %w", err)
 	}
-	claudeAgent.Install(builder)
+	brAgent.Install(builder)
 
-	port, err := findFreePortClaude()
+	port, err := findFreePortBR()
 	if err != nil {
 		return fmt.Errorf("finding free port: %w", err)
 	}
 
-	sharedContainerName = constants.ContainerNamePrefix + sanitizeClaude(dirName)
+	sharedContainerName = constants.ContainerNamePrefix + sanitizeBR(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
 
@@ -132,9 +132,9 @@ func setupSharedContainer() error {
 		HostGID: info.GID,
 	}
 
-	_, err = docker.BuildImage(ctx, sharedClient, baseSpec, false)
+	_, err = docker.BuildImage(ctx, sharedClient, baseSpec, true)
 	if err != nil {
-		return fmt.Errorf("building base image with claude: %w", err)
+		return fmt.Errorf("building base image with build-resources: %w", err)
 	}
 
 	// Build instance image
@@ -164,9 +164,9 @@ func setupSharedContainer() error {
 		HostGID: info.GID,
 	}
 
-	_, err = docker.BuildImage(ctx, sharedClient, spec, false)
+	_, err = docker.BuildImage(ctx, sharedClient, spec, true)
 	if err != nil {
-		return fmt.Errorf("building container image with claude: %w", err)
+		return fmt.Errorf("building container image with build-resources: %w", err)
 	}
 
 	_, err = docker.CreateContainer(ctx, sharedClient, spec)
@@ -179,7 +179,6 @@ func setupSharedContainer() error {
 		return fmt.Errorf("starting container: %w", err)
 	}
 
-	// Claude installation takes longer — allow up to 2 minutes for SSH.
 	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 120*time.Second)
 	if err != nil {
 		return fmt.Errorf("waiting for SSH to be ready: %w", err)
@@ -206,46 +205,109 @@ func teardownSharedContainer() {
 }
 
 // ----------------------------------------------------------------------------
-// 16.8 TestClaudeAvailableInContainer
-// Validates: CC-2.3
+// TestPython3Available
+// Validates: BR-2.1
 // ----------------------------------------------------------------------------
 
-func TestClaudeAvailableInContainer(t *testing.T) {
+func TestPython3Available(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
-
-	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"claude", "--version"})
-	require.NoError(t, err, "exec claude --version")
-	require.Equal(t, 0, exitCode, "expected 'claude --version' to exit 0")
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"python3", "--version"})
+	require.NoError(t, err, "exec python3 --version")
+	require.Equal(t, 0, exitCode, "expected 'python3 --version' to exit 0")
 }
 
 // ----------------------------------------------------------------------------
-// 16.9 TestClaudeHealthCheck
-// Validates: CC-5
+// TestUVAvailable
+// Validates: BR-2.2, BR-2.3
 // ----------------------------------------------------------------------------
 
-func TestClaudeHealthCheck(t *testing.T) {
+func TestUVAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"uv", "--version"})
+	require.NoError(t, err, "exec uv --version")
+	require.Equal(t, 0, exitCode, "expected 'uv --version' to exit 0 (installed system-wide to /usr/local/bin)")
+}
+
+// ----------------------------------------------------------------------------
+// TestCMakeAvailable
+// Validates: BR-2.4
+// ----------------------------------------------------------------------------
+
+func TestCMakeAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"cmake", "--version"})
+	require.NoError(t, err, "exec cmake --version")
+	require.Equal(t, 0, exitCode, "expected 'cmake --version' to exit 0")
+}
+
+// ----------------------------------------------------------------------------
+// TestJavacAvailable
+// Validates: BR-2.6
+// ----------------------------------------------------------------------------
+
+func TestJavacAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"javac", "-version"})
+	require.NoError(t, err, "exec javac -version")
+	require.Equal(t, 0, exitCode, "expected 'javac -version' to exit 0")
+}
+
+// ----------------------------------------------------------------------------
+// TestGoAvailable
+// Validates: BR-2.7
+// ----------------------------------------------------------------------------
+
+func TestGoAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"bash", "-lc", "go version"})
+	require.NoError(t, err, "exec go version")
+	require.Equal(t, 0, exitCode, "expected 'go version' to exit 0")
+}
+
+// ----------------------------------------------------------------------------
+// TestBuildResourcesHealthCheck
+// Validates: BR-4
+// ----------------------------------------------------------------------------
+
+func TestBuildResourcesHealthCheck(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
 
-	claudeAgent, err := agent.Lookup(constants.ClaudeCodeAgentName)
-	require.NoError(t, err, "looking up claude agent")
+	brAgent, err := agent.Lookup(constants.BuildResourcesAgentName)
+	require.NoError(t, err, "looking up build-resources agent")
 
-	err = claudeAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
-	require.NoError(t, err, "claude HealthCheck should return no error")
+	err = brAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	require.NoError(t, err, "build-resources HealthCheck should return no error")
 }
 
 // ----------------------------------------------------------------------------
 // Internal helpers
 // ----------------------------------------------------------------------------
 
-func findFreePortClaude() (int, error) {
+func findFreePortBR() (int, error) {
 	for port := constants.SSHPortStart; port < 65535; port++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err == nil {
@@ -256,7 +318,7 @@ func findFreePortClaude() (int, error) {
 	return 0, fmt.Errorf("no free port found starting at %d", constants.SSHPortStart)
 }
 
-func sanitizeClaude(s string) string {
+func sanitizeBR(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder
 	for _, r := range s {

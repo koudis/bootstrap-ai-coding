@@ -41,6 +41,8 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **SSH_Config_Entry**: A `Host` stanza in the SSH_Config_File managed by the tool, identified by a `Host` value matching the Container name (e.g. `bac-my-project`).
 - **Image_Build_Timeout**: The maximum wall-clock duration the CLI will wait for a Container_Image build to complete before cancelling it. Defined as `constants.ImageBuildTimeout` (8 minutes). Agent installation steps (Node.js, npm packages) are legitimately slow on a cold cache, but a build that exceeds this limit is assumed to be hung and is terminated.
 - **Verbose_Mode**: The operating mode activated by the `--verbose` (`-v`) flag. When Verbose_Mode is active, all Docker build output (layer-by-layer progress, `RUN` step output, etc.) is streamed to stdout in real time during a Container_Image build. When Verbose_Mode is inactive (the default), the build runs silently and only the "Building image..." message is shown.
+- **Host_Git_Config**: The git configuration file at `~/.gitconfig` on the Host. If present, its contents are injected into the Container_Image at build time as a read-only file at `<Container_User_Home>/.gitconfig`. This provides the Container_User with the Host_User's git identity and preferences (author name, email, aliases, etc.) without requiring manual configuration inside the Container.
+- **Restart_Policy**: The Docker restart policy applied to the Container at creation time. Controls whether the Container automatically restarts after a host reboot or daemon restart. Valid values: `no`, `always`, `unless-stopped`, `on-failure`. Default: `unless-stopped`.
 
 ---
 
@@ -402,3 +404,37 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 2. WHEN a user runs the `hostname` command inside the Container, THE output SHALL be the Container_Name.
 3. THE Container hostname SHALL be set via the Docker SDK `Hostname` field in the container configuration passed to `ContainerCreate`.
 4. THE CLI SHALL NOT override the default bash PS1 behaviour — the default Ubuntu shell prompt configuration (which includes `\h`) SHALL be sufficient to display the Container_Name in the prompt.
+
+---
+
+### Requirement 24: Git Configuration Forwarding
+
+**User Story:** As a developer, I want my host `~/.gitconfig` to be available inside the container, so that git operations (commits, pushes, rebases) use my identity and preferences without manual setup inside the container.
+
+#### Acceptance Criteria
+
+1. WHEN a Container_Image is built, THE CLI/startup layer SHALL read the Host_User's `~/.gitconfig` file and pass its contents as the `gitConfig` string parameter to `DockerfileBuilder`. THE `DockerfileBuilder` SHALL inject the provided `gitConfig` into the Container_Image at `<Container_User_Home>/.gitconfig`. THE `DockerfileBuilder` itself SHALL NOT perform any filesystem I/O to read `~/.gitconfig` — it receives the content as a pre-read parameter.
+2. THE injected `.gitconfig` file inside the Container_Image SHALL be owned by the Container_User.
+3. THE injected `.gitconfig` file inside the Container_Image SHALL have permissions `0444` (read-only for all; the Container_User SHALL NOT be able to write to it).
+4. IF the Host_User's `~/.gitconfig` file does not exist on the Host at build time, THE CLI/startup layer SHALL pass an empty string as `gitConfig`, and THE `DockerfileBuilder` SHALL skip the git configuration injection silently (no error, no warning, no Dockerfile instruction emitted).
+5. WHEN `--rebuild` is used, THE CLI/startup layer SHALL re-read the current Host_User's `~/.gitconfig` and pass the latest content to `DockerfileBuilder` via the `gitConfig` parameter.
+6. THE injection mechanism SHALL use base64 encoding within a `RUN` instruction (not `COPY`) so that the Dockerfile remains self-contained — no external build context files are required. This keeps the builder's output a single string, consistent with how SSH host keys and the keyring script are injected.
+
+---
+
+### Requirement 25: Container Restart Policy
+
+**User Story:** As a developer, I want my container to automatically restart after a host reboot, so that my AI coding session is available again without me having to manually re-run the tool.
+
+#### Acceptance Criteria
+
+1. THE CLI SHALL accept a `--docker-restart-policy` flag whose value is one of the Docker restart policy names: `no`, `always`, `unless-stopped`, `on-failure`.
+2. WHEN the `--docker-restart-policy` flag is omitted, THE CLI SHALL default to `unless-stopped`.
+3. WHEN a Container is created, THE CLI SHALL set the Docker `RestartPolicy` in the container's `HostConfig` to the value specified by `--docker-restart-policy`.
+4. WHEN the restart policy is `unless-stopped`, THE Container SHALL automatically restart after a host reboot if it was running at the time of shutdown. A Container that was explicitly stopped (via `--stop-and-remove` or `docker stop`) SHALL NOT restart after reboot.
+5. WHEN the restart policy is `always`, THE Container SHALL restart after a host reboot regardless of its previous state.
+6. WHEN the restart policy is `no`, THE Container SHALL NOT restart automatically under any circumstances.
+7. WHEN the restart policy is `on-failure`, THE Container SHALL restart only if it exited with a non-zero exit code.
+8. IF the `--docker-restart-policy` flag is provided with an invalid value (not one of `no`, `always`, `unless-stopped`, `on-failure`), THEN THE CLI SHALL print a descriptive error message to stderr listing the valid values and exit with a non-zero exit code.
+9. THE `--docker-restart-policy` flag SHALL only be valid in START mode; it is a START-only flag subject to the CLI-3 constraint.
+10. WHEN a Container already exists and the CLI reconnects to it, THE CLI SHALL NOT modify the existing Container's restart policy — the policy is set only at Container creation time.

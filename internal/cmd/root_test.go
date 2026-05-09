@@ -8,6 +8,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/cmd"
+	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 )
 
 // Feature: bootstrap-ai-coding, Property 16: --agents flag parsing produces correct agent ID slices
@@ -321,4 +322,79 @@ func TestVerboseFlagWithPurgeRejected(t *testing.T) {
 		"error must name the offending flag")
 	require.Contains(t, err.Error(), "--purge",
 		"error must name the conflicting mode flag")
+}
+
+// TestRestartPolicyFlagWithStopRejected verifies that --docker-restart-policy
+// is rejected when used with --stop-and-remove (CLI-3).
+// Validates: CLI-3
+func TestRestartPolicyFlagWithStopRejected(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModeStop, []string{"docker-restart-policy"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--docker-restart-policy",
+		"error must name the offending flag")
+	require.Contains(t, err.Error(), "--stop-and-remove",
+		"error must name the conflicting mode flag")
+}
+
+// TestRestartPolicyFlagWithPurgeRejected verifies that --docker-restart-policy
+// is rejected when used with --purge (CLI-3).
+// Validates: CLI-3
+func TestRestartPolicyFlagWithPurgeRejected(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModePurge, []string{"docker-restart-policy"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--docker-restart-policy",
+		"error must name the offending flag")
+	require.Contains(t, err.Error(), "--purge",
+		"error must name the conflicting mode flag")
+}
+
+// TestRestartPolicyInvalidValueRejected verifies that invalid restart policy
+// values produce errors from ValidateRestartPolicy.
+func TestRestartPolicyInvalidValueRejected(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{name: "random word", value: "invalid"},
+		{name: "restart keyword", value: "restart"},
+		{name: "uppercase ALWAYS", value: "ALWAYS"},
+		{name: "mixed case Never", value: "Never"},
+		{name: "empty string", value: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := cmd.ValidateRestartPolicy(tc.value)
+			require.Error(t, err, "ValidateRestartPolicy(%q) must return an error", tc.value)
+			require.Contains(t, err.Error(), "invalid --docker-restart-policy",
+				"error message must mention the flag")
+		})
+	}
+}
+
+// Feature: bootstrap-ai-coding, Property 55: for any string, validation accepts iff it's in the valid set
+func TestPropertyRestartPolicyValidationAcceptsIffValid(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		policy := rapid.String().Draw(t, "policy")
+		err := cmd.ValidateRestartPolicy(policy)
+		isValid := cmd.ValidRestartPolicies[policy]
+		if isValid {
+			require.NoError(t, err, "valid policy %q must be accepted", policy)
+		} else {
+			require.Error(t, err, "invalid policy %q must be rejected", policy)
+		}
+	})
+}
+
+// TestRestartPolicyDefaultIsUnlessStopped verifies that the --docker-restart-policy
+// flag has default value "unless-stopped" (i.e., constants.DefaultRestartPolicy).
+// Validates: Req 25.2
+func TestRestartPolicyDefaultIsUnlessStopped(t *testing.T) {
+	// Verify the constant itself equals the expected string.
+	require.Equal(t, "unless-stopped", constants.DefaultRestartPolicy,
+		"DefaultRestartPolicy constant must be \"unless-stopped\"")
+
+	// Verify the default value passes validation (confirming it is a valid policy).
+	err := cmd.ValidateRestartPolicy(constants.DefaultRestartPolicy)
+	require.NoError(t, err,
+		"the default restart policy must pass validation")
 }

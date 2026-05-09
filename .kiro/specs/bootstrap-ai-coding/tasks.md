@@ -1,24 +1,88 @@
-# Tasks — Module Consolidation (Req 28)
+# Tasks: Container Restart Policy (Req 25, CLI-7)
 
-Merge `internal/credentials` and `internal/portfinder` into `internal/datadir`.
+## Task Dependency Graph
 
-## 1. Merge credentials into datadir
+```
+Task 1 (constants) → Task 2 (ContainerSpec) → Task 3 (runner) → Task 4 (cmd flags) → Task 5 (tests)
+```
 
-- [x] 1.1 Create `internal/datadir/credentials.go` with `ResolveCredentialPath` and `EnsureCredentialDir` functions (same logic as `credentials.Resolve` and `credentials.EnsureDir`)
-- [x] 1.2 Create `internal/datadir/credentials_test.go` — move all tests from `internal/credentials/store_test.go`, updating import paths from `credentials` to `datadir`
-- [x] 1.3 Update `internal/cmd/root.go` — replace `credentials.Resolve` with `datadir.ResolveCredentialPath` and `credentials.EnsureDir` with `datadir.EnsureCredentialDir`; remove the `credentials` import
-- [x] 1.4 Delete `internal/credentials/store.go` and `internal/credentials/store_test.go`
-- [x] 1.5 Verify build passes: `go build ./...`
+---
 
-## 2. Merge portfinder into datadir
+## Task 1: Add `DefaultRestartPolicy` constant
 
-- [x] 2.1 Create `internal/datadir/portfinder.go` with `FindFreePort` and `IsPortFree` functions (same logic as `portfinder.FindFreePort` and `portfinder.IsPortFree`)
-- [x] 2.2 Create `internal/datadir/portfinder_test.go` — move all tests from `internal/portfinder/portfinder_test.go`, updating import paths from `portfinder` to `datadir`
-- [x] 2.3 Update `internal/cmd/root.go` — replace `portfinder.FindFreePort` with `datadir.FindFreePort` and `portfinder.IsPortFree` with `datadir.IsPortFree`; remove the `portfinder` import
-- [x] 2.4 Delete `internal/portfinder/portfinder.go` and `internal/portfinder/portfinder_test.go`
-- [x] 2.5 Verify build passes: `go build ./...`
+- [x] Add `DefaultRestartPolicy = "unless-stopped"` to `internal/constants/constants.go`
 
-## 3. Run full test suite
+### Files to modify
+- `internal/constants/constants.go`
 
-- [x] 3.1 Run `go test ./...` and confirm all unit and property-based tests pass
-- [x] 3.2 Run `go vet ./...` and confirm no issues
+### Acceptance criteria
+- `constants.DefaultRestartPolicy` exists and equals `"unless-stopped"`
+- No other package hardcodes the default restart policy string
+
+---
+
+## Task 2: Add `RestartPolicy` field to `ContainerSpec`
+
+- [x] Add `RestartPolicy string` field to the `ContainerSpec` struct in `internal/docker/runner.go`
+
+### Files to modify
+- `internal/docker/runner.go`
+
+### Acceptance criteria
+- `ContainerSpec` has a `RestartPolicy string` field
+- Existing code that constructs `ContainerSpec` still compiles (field is zero-value safe)
+
+---
+
+## Task 3: Apply restart policy in `CreateContainer`
+
+- [x] In `CreateContainer` (`internal/docker/runner.go`), set `HostConfig.RestartPolicy` from `spec.RestartPolicy`
+- [x] If `spec.RestartPolicy` is empty, default to `constants.DefaultRestartPolicy`
+
+### Files to modify
+- `internal/docker/runner.go`
+
+### Acceptance criteria
+- Containers created via `CreateContainer` have the Docker restart policy set
+- When `RestartPolicy` is empty string, `unless-stopped` is used as fallback
+- When `RestartPolicy` is explicitly set, that value is used
+
+---
+
+## Task 4: Add `--docker-restart-policy` flag and validation in CLI
+
+- [x] Add `flagDockerRestartPolicy string` variable
+- [x] Register `--docker-restart-policy` flag in `init()` with default `constants.DefaultRestartPolicy`
+- [x] Add `"docker-restart-policy"` to the `startOnly` map in `ValidateStartOnlyFlags`
+- [x] Add validation: reject values not in `{no, always, unless-stopped, on-failure}`
+- [x] Pass the flag value to `ContainerSpec.RestartPolicy` when creating the container in `runStart`
+
+### Files to modify
+- `internal/cmd/root.go`
+
+### Acceptance criteria
+- `--docker-restart-policy` flag is registered with default `"unless-stopped"`
+- Invalid values produce a descriptive error listing valid options (exit 1)
+- Flag is rejected in STOP and PURGE modes (CLI-3)
+- The value is threaded through to `ContainerSpec.RestartPolicy` in `runStart`
+
+---
+
+## Task 5: Add unit and property-based tests
+
+- [x] Add `TestRestartPolicyDefaultIsUnlessStopped` — verify flag default
+- [x] Add `TestRestartPolicyInvalidValueRejected` — verify invalid values produce errors
+- [x] Add `TestRestartPolicyFlagWithStopRejected` — verify CLI-3 for STOP mode
+- [x] Add `TestRestartPolicyFlagWithPurgeRejected` — verify CLI-3 for PURGE mode
+- [x] Add `TestRestartPolicyAppliedToContainerSpec` — verify the value reaches `HostConfig`
+- [x] Add property test (Property 55): for any string, validation accepts iff it's in the valid set
+- [x] Add property test (Property 56): for any valid policy, ContainerSpec.RestartPolicy matches
+
+### Files to modify
+- `internal/cmd/root_test.go`
+- `internal/docker/runner_test.go` (or new file `internal/docker/runner_restart_test.go`)
+
+### Acceptance criteria
+- All new tests pass with `go test ./...`
+- Property tests use `pgregory.net/rapid` with minimum 100 iterations
+- Property test tag format: `// Feature: bootstrap-ai-coding, Property N: <description>`

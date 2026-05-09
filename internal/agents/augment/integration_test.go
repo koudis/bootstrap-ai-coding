@@ -99,11 +99,10 @@ func setupSharedContainer() error {
 		conflictingUser = conflictingImageUser.Username
 	}
 
-	builder := docker.NewDockerfileBuilder(
+	builder := docker.NewBaseImageBuilder(
 		info,
-		userPubKey,
-		hostKeyPriv, hostKeyPub,
 		strategy, conflictingUser,
+		"",
 	)
 
 	augmentAgent, err := agent.Lookup(constants.AugmentCodeAgentName)
@@ -121,12 +120,35 @@ func setupSharedContainer() error {
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
 
-	builder.Finalize()
+	// Build base image
+	baseSpec := docker.ContainerSpec{
+		Name:       sharedContainerName,
+		ImageTag:   constants.BaseImageTag,
+		Dockerfile: builder.Build(),
+		Labels: map[string]string{
+			"bac.managed": "true",
+		},
+		HostUID: info.UID,
+		HostGID: info.GID,
+	}
+
+	_, err = docker.BuildImage(ctx, sharedClient, baseSpec, true)
+	if err != nil {
+		return fmt.Errorf("building base image with augment: %w", err)
+	}
+
+	// Build instance image
+	instanceBuilder := docker.NewInstanceImageBuilder(
+		info,
+		userPubKey,
+		hostKeyPriv, hostKeyPub,
+	)
+	instanceBuilder.Finalize()
 
 	spec := docker.ContainerSpec{
 		Name:       sharedContainerName,
 		ImageTag:   sharedImageTag,
-		Dockerfile: builder.Build(),
+		Dockerfile: instanceBuilder.Build(),
 		Mounts: []docker.Mount{
 			{
 				HostPath:      projectDir,

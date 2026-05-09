@@ -413,11 +413,11 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 #### Acceptance Criteria
 
-1. WHEN a Container_Image is built, THE DockerfileBuilder SHALL read the Host_User's `~/.gitconfig` file (resolved via `hostinfo.Info.HomeDir`) and inject its contents into the Container_Image at `<Container_User_Home>/.gitconfig`.
+1. WHEN a Container_Image is built, THE CLI/startup layer SHALL read the Host_User's `~/.gitconfig` file and pass its contents as the `gitConfig` string parameter to `DockerfileBuilder`. THE `DockerfileBuilder` SHALL inject the provided `gitConfig` into the Container_Image at `<Container_User_Home>/.gitconfig`. THE `DockerfileBuilder` itself SHALL NOT perform any filesystem I/O to read `~/.gitconfig` — it receives the content as a pre-read parameter.
 2. THE injected `.gitconfig` file inside the Container_Image SHALL be owned by the Container_User.
 3. THE injected `.gitconfig` file inside the Container_Image SHALL have permissions `0444` (read-only for all; the Container_User SHALL NOT be able to write to it).
-4. IF the Host_User's `~/.gitconfig` file does not exist on the Host at build time, THE DockerfileBuilder SHALL skip the git configuration injection silently (no error, no warning, no output).
-5. WHEN `--rebuild` is used, THE DockerfileBuilder SHALL re-read the current Host_User's `~/.gitconfig` and inject the latest version into the rebuilt Container_Image.
+4. IF the Host_User's `~/.gitconfig` file does not exist on the Host at build time, THE CLI/startup layer SHALL pass an empty string as `gitConfig`, and THE `DockerfileBuilder` SHALL skip the git configuration injection silently (no error, no warning, no Dockerfile instruction emitted).
+5. WHEN `--rebuild` is used, THE CLI/startup layer SHALL re-read the current Host_User's `~/.gitconfig` and pass the latest content to `DockerfileBuilder` via the `gitConfig` parameter.
 6. THE injection mechanism SHALL use base64 encoding within a `RUN` instruction (not `COPY`) so that the Dockerfile remains self-contained — no external build context files are required. This keeps the builder's output a single string, consistent with how SSH host keys and the keyring script are injected.
 
 ---

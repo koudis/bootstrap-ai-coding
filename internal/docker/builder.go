@@ -158,18 +158,21 @@ func NewInstanceImageBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKe
 	// 2. Inject persisted SSH host key pair (type: constants.SSHHostKeyType)
 	privPath := fmt.Sprintf("/etc/ssh/ssh_host_%s_key", constants.SSHHostKeyType)
 	pubPath := privPath + ".pub"
+	privB64 := base64.StdEncoding.EncodeToString([]byte(hostKeyPriv))
+	pubB64 := base64.StdEncoding.EncodeToString([]byte(hostKeyPub))
 	b.Run(fmt.Sprintf(
-		"echo %s > %s && echo %s > %s && chmod 600 %s && chmod 644 %s",
-		fmt.Sprintf("%q", hostKeyPriv), privPath,
-		fmt.Sprintf("%q", hostKeyPub), pubPath,
+		"echo %s | base64 -d > %s && echo %s | base64 -d > %s && chmod 600 %s && chmod 644 %s",
+		privB64, privPath,
+		pubB64, pubPath,
 		privPath, pubPath,
 	))
 
 	// 3. Install SSH public key for Container_User
+	pubKeyB64 := base64.StdEncoding.EncodeToString([]byte(publicKey))
 	b.Run(fmt.Sprintf(
-		"mkdir -p %s/.ssh && echo %s >> %s/.ssh/authorized_keys && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys && chown -R %s:%s %s/.ssh",
+		"mkdir -p %s/.ssh && echo %s | base64 -d >> %s/.ssh/authorized_keys && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys && chown -R %s:%s %s/.ssh",
 		info.HomeDir,
-		fmt.Sprintf("%q", publicKey),
+		pubKeyB64,
 		info.HomeDir,
 		info.HomeDir,
 		info.HomeDir,

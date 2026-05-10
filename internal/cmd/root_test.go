@@ -385,6 +385,37 @@ func TestPropertyRestartPolicyValidationAcceptsIffValid(t *testing.T) {
 	})
 }
 
+// TestHostNetworkOffFlagAcceptedInStartMode verifies that --host-network-off
+// is accepted when used in START mode (no error from flag validation).
+func TestHostNetworkOffFlagAcceptedInStartMode(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModeStart, []string{"host-network-off"})
+	require.NoError(t, err, "--host-network-off must be accepted in START mode")
+}
+
+// TestHostNetworkOffFlagWithStopRejected verifies that --host-network-off
+// is rejected when used with --stop-and-remove (CLI-3).
+// Validates: CLI-3
+func TestHostNetworkOffFlagWithStopRejected(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModeStop, []string{"host-network-off"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--host-network-off",
+		"error must name the offending flag")
+	require.Contains(t, err.Error(), "--stop-and-remove",
+		"error must name the conflicting mode flag")
+}
+
+// TestHostNetworkOffFlagWithPurgeRejected verifies that --host-network-off
+// is rejected when used with --purge (CLI-3).
+// Validates: CLI-3
+func TestHostNetworkOffFlagWithPurgeRejected(t *testing.T) {
+	err := cmd.ValidateStartOnlyFlags(cmd.ModePurge, []string{"host-network-off"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--host-network-off",
+		"error must name the offending flag")
+	require.Contains(t, err.Error(), "--purge",
+		"error must name the conflicting mode flag")
+}
+
 // TestRestartPolicyDefaultIsUnlessStopped verifies that the --docker-restart-policy
 // flag has default value "unless-stopped" (i.e., constants.DefaultRestartPolicy).
 // Validates: Req 25.2

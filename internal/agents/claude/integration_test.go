@@ -142,6 +142,7 @@ func setupSharedContainer() error {
 		info,
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
+		port, false,
 	)
 	instanceBuilder.Finalize()
 

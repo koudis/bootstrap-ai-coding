@@ -196,7 +196,7 @@ RUN echo manifest > /bac-manifest.json          ← manifest
 FROM bac-base:latest
 RUN SSH host key injection                      ← per-project (core Req 13)
 RUN SSH authorized_keys                         ← per-user key (core Req 4)
-RUN sshd_config hardening                       ← stable
+RUN sshd_config hardening + Port/ListenAddress  ← per-project (Req 26.2)
 RUN mkdir /run/sshd                             ← stable
 CMD ["/usr/sbin/sshd", "-D"]                    ← always last (Req 21.2)
 ```

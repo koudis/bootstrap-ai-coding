@@ -322,13 +322,25 @@ func validateRestartPolicy(policy string) error {
 
 **Application in `docker/runner.go`** (`CreateContainer`):
 
-The `ContainerSpec.RestartPolicy` field is mapped to the Docker SDK's `container.RestartPolicy` struct in `HostConfig`:
+The `ContainerSpec.RestartPolicy` field is mapped to the Docker SDK's `container.RestartPolicy` struct in `HostConfig`. The network mode depends on `ContainerSpec.HostNetworkOff` (Req 26):
 
 ```go
 import "github.com/docker/docker/api/types/container"
 
+// Host network mode (default: HostNetworkOff == false)
 hostConfig := &container.HostConfig{
-    // ... existing port bindings, mounts, etc.
+    NetworkMode:   "host",  // Req 26: share host network namespace
+    Mounts:        mounts,
+    RestartPolicy: container.RestartPolicy{
+        Name: container.RestartPolicyMode(spec.RestartPolicy),
+    },
+    // No PortBindings — host network mode makes them unnecessary (Req 26.4)
+}
+
+// Bridge mode (HostNetworkOff == true, i.e. --host-network-off IS set)
+hostConfig := &container.HostConfig{
+    PortBindings:  portBindings,  // maps container:22 → host:SSH_Port
+    Mounts:        mounts,
     RestartPolicy: container.RestartPolicy{
         Name: container.RestartPolicyMode(spec.RestartPolicy),
     },
@@ -342,6 +354,21 @@ hostConfig := &container.HostConfig{
 3. Stores it in `Config.RestartPolicy`
 4. Passes it to `ContainerSpec.RestartPolicy` when constructing the spec
 5. `docker/runner.go` applies it in `CreateContainer`
+
+**`--host-network-off` flag (Req 26):**
+
+```go
+rootCmd.Flags().Bool("host-network-off", false,
+    "Disable host network mode; use bridge networking with port mapping instead")
+```
+
+**Threading from CLI to runner:**
+
+1. `cmd/root.go` reads `--host-network-off` flag value (default: `false`)
+2. Stores it in `Config.HostNetworkOff`
+3. Passes it to `ContainerSpec.HostNetworkOff` when constructing the spec
+4. `docker/runner.go` selects `NetworkMode: "host"` or bridge + port bindings in `CreateContainer`
+5. Passes it to `NewInstanceImageBuilder` to control whether sshd_config includes `Port`/`ListenAddress` directives
 
 **Behaviour with `--stop-and-remove`:**
 

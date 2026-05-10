@@ -74,6 +74,7 @@ func ValidateStartOnlyFlags(mode Mode, changedFlags []string) error {
 		"no-update-ssh-config":  true,
 		"verbose":               true,
 		"docker-restart-policy": true,
+		"host-network-off":      true,
 	}
 	for _, name := range changedFlags {
 		if startOnly[name] {
@@ -147,6 +148,7 @@ var (
 	flagNoUpdateSSHConfig   bool
 	flagVerbose             bool
 	flagDockerRestartPolicy string
+	flagHostNetworkOff      bool
 )
 
 var rootCmd = &cobra.Command{
@@ -175,6 +177,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagNoUpdateSSHConfig, "no-update-ssh-config", false, "Skip automatic ~/.ssh/config management")
 	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Stream Docker build output to stdout in real time")
 	rootCmd.Flags().StringVar(&flagDockerRestartPolicy, "docker-restart-policy", constants.DefaultRestartPolicy, "Docker restart policy for the container (no, always, unless-stopped, on-failure)")
+	rootCmd.Flags().BoolVar(&flagHostNetworkOff, "host-network-off", false, "Disable host network mode; use bridge networking with port mapping")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -253,7 +256,7 @@ func run(cmd *cobra.Command, args []string) error {
 	case ModePurge:
 		return runPurge(dockerClient)
 	default:
-		return runStart(dockerClient, args[0], enabledAgents)
+		return runStart(dockerClient, args[0], enabledAgents, flagHostNetworkOff)
 	}
 }
 
@@ -394,7 +397,7 @@ func runPurge(c *dockerpkg.Client) error {
 	return nil
 }
 
-func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Agent) error {
+func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Agent, hostNetworkOff bool) error {
 	ctx := context.Background()
 
 	absPath, err := filepath.Abs(projectPath)
@@ -532,6 +535,19 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return fmt.Errorf("determining build requirements: %w", buildErr)
 	}
 
+	// Network mode change detection: only check when an image already exists
+	// (i.e., not a first run where both layers need building).
+	if !needBase && !flagRebuild {
+		persistedOff, err := dd.ReadHostNetworkOff()
+		if err != nil {
+			return fmt.Errorf("reading persisted host network mode: %w", err)
+		}
+		if persistedOff != hostNetworkOff {
+			fmt.Println("Network mode changed — run with --rebuild to update the image.")
+			return nil
+		}
+	}
+
 	if needBase {
 		// Check for UID/GID conflict in base image
 		strategy := dockerpkg.UserStrategyCreate
@@ -595,7 +611,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	if needInstance {
-		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub, sshPort, hostNetworkOff)
 		instanceBuilder.Finalize()
 
 		instanceSpec := dockerpkg.ContainerSpec{
@@ -612,6 +628,10 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildOutput)
 			return fmt.Errorf("instance image build failed: %w", err)
+		}
+
+		if err := dd.WriteHostNetworkOff(hostNetworkOff); err != nil {
+			return fmt.Errorf("persisting host network mode: %w", err)
 		}
 	}
 
@@ -658,12 +678,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	spec := dockerpkg.ContainerSpec{
-		Name:          containerName,
-		ImageTag:      imageTag,
-		Mounts:        mounts,
-		SSHPort:       sshPort,
-		Labels:        labels,
-		RestartPolicy: flagDockerRestartPolicy,
+		Name:           containerName,
+		ImageTag:       imageTag,
+		Mounts:         mounts,
+		SSHPort:        sshPort,
+		Labels:         labels,
+		RestartPolicy:  flagDockerRestartPolicy,
+		HostNetworkOff: hostNetworkOff,
 	}
 
 	if _, err := dockerpkg.CreateContainer(ctx, c, spec); err != nil {

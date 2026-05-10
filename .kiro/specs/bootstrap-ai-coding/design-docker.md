@@ -42,8 +42,10 @@ func NewBaseImageBuilder(info *hostinfo.Info, strategy UserStrategy,
 
 // NewInstanceImageBuilder produces the Dockerfile for bac-<name>:latest.
 // Starts with FROM bac-base:latest, adds only per-project SSH config + CMD.
+// When hostNetworkOff is false (default), sshd_config includes Port and ListenAddress
+// directives for host network mode. When true, sshd uses default port 22 (bridge mode).
 func NewInstanceImageBuilder(info *hostinfo.Info,
-    publicKey, hostKeyPriv, hostKeyPub string) *DockerfileBuilder
+    publicKey, hostKeyPriv, hostKeyPub string, sshPort int, hostNetworkOff bool) *DockerfileBuilder
 ```
 
 The existing `NewDockerfileBuilder` is replaced by these two functions. Agent `Install()` methods are called on the base builder only. The instance builder has no agent steps — it's just SSH key injection + CMD.
@@ -115,6 +117,15 @@ When `--rebuild` is set:
 2. Build Base_Image with `NoCache: true`
 3. Build Instance_Image (inherits fresh base)
 4. Create and start new container
+
+### `--host-network-off` and Instance_Image
+
+The `--host-network-off` flag (Req 26) affects the Instance_Image content:
+
+- **Default (host network mode):** `NewInstanceImageBuilder` appends `Port <SSH_Port>` and `ListenAddress 127.0.0.1` to sshd_config. The container is created with `NetworkMode: "host"` and no port bindings.
+- **`--host-network-off` set (bridge mode):** `NewInstanceImageBuilder` omits the `Port` and `ListenAddress` directives — sshd uses its default port 22. The container is created with bridge networking and Docker port bindings (`127.0.0.1:<SSH_Port>` → container port 22).
+
+Changing `--host-network-off` between invocations produces a different Instance_Image (different sshd_config). The CLI detects this mismatch and requires `--rebuild` to regenerate the Instance_Image.
 
 ### `--stop-and-remove` Behavior
 

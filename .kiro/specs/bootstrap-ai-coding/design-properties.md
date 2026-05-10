@@ -215,11 +215,11 @@
 
 ---
 
-#### Property 22b: SSH port is always bound to the selected host port
+#### Property 22b: SSH port configuration matches the selected network mode
 
-*For any* valid port number, the container spec SHALL contain a port binding mapping container port `constants.ContainerSSHPort/tcp` to that host port.
+*For any* valid port number and network mode setting: WHEN host network mode is active, the Instance_Image Dockerfile SHALL contain sshd_config directives setting `Port <SSH_Port>` and `ListenAddress 127.0.0.1`, and the container spec SHALL use `NetworkMode: "host"` with no `PortBindings` or `ExposedPorts`. WHEN bridge mode is active, the Instance_Image Dockerfile SHALL NOT contain `Port` or `ListenAddress` directives, and the container spec SHALL contain a port binding mapping container port `constants.ContainerSSHPort/tcp` to `constants.HostBindIP:<SSH_Port>`.
 
-**Validates: Req 12.4**
+**Validates: Req 12.4, Req 26.2, Req 26.4, Req 26.6**
 
 ---
 
@@ -326,6 +326,14 @@
 *For any* valid restart policy value (`no`, `always`, `unless-stopped`, `on-failure`), the `ContainerSpec` produced for container creation SHALL have its `RestartPolicy` field set to that exact value.
 
 **Validates: Req 25.3**
+
+---
+
+#### Property 57: --host-network-off controls network mode and sshd_config
+
+*For any* container creation: WHEN `HostNetworkOff` is `false` (default), the `ContainerSpec` SHALL produce a container with `NetworkMode: "host"` and no port bindings, and the Instance_Image Dockerfile SHALL contain `Port <SSH_Port>` and `ListenAddress 127.0.0.1` in sshd_config. WHEN `HostNetworkOff` is `true`, the `ContainerSpec` SHALL produce a container with default bridge networking and port bindings mapping `constants.ContainerSSHPort/tcp` to `constants.HostBindIP:<SSH_Port>`, and the Instance_Image Dockerfile SHALL NOT contain `Port` or `ListenAddress` directives.
+
+**Validates: Req 26.1, 26.2, 26.4, 26.6, 26.7, 26.13**
 
 ---
 

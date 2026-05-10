@@ -17,6 +17,7 @@ This document defines which flag combinations are valid, invalid, or redundant. 
 | `C` | `--no-update-ssh-config` |
 | `V` | `--verbose` |
 | `D` | `--docker-restart-policy` |
+| `H` | `--host-network-off` |
 | `S` | `--stop-and-remove` |
 | `U` | `--purge` |
 
@@ -71,11 +72,11 @@ IF START or STOP mode AND `P` is absent THEN THE CLI SHALL print a usage message
 
 ### Requirement CLI-3: START-only flags are invalid in STOP and PURGE modes
 
-`A`, `T`, `K`, `R`, `N`, `C`, `V`, and `D` are only meaningful in START mode. They have no effect on STOP or PURGE operations and must not be silently ignored.
+`A`, `T`, `K`, `R`, `N`, `C`, `V`, `D`, and `H` are only meaningful in START mode. They have no effect on STOP or PURGE operations and must not be silently ignored.
 
-**Formal:** `(S ∨ U) → ¬(A ∨ T ∨ K ∨ R ∨ N ∨ C ∨ V ∨ D)`
+**Formal:** `(S ∨ U) → ¬(A ∨ T ∨ K ∨ R ∨ N ∨ C ∨ V ∨ D ∨ H)`
 
-IF STOP or PURGE mode AND any of `A`, `T`, `K`, `R`, `N`, `C`, `V`, `D` is provided THEN THE CLI SHALL print a descriptive error to stderr identifying the incompatible flag(s) and exit with a non-zero exit code.
+IF STOP or PURGE mode AND any of `A`, `T`, `K`, `R`, `N`, `C`, `V`, `D`, `H` is provided THEN THE CLI SHALL print a descriptive error to stderr identifying the incompatible flag(s) and exit with a non-zero exit code.
 
 ---
 
@@ -125,33 +126,36 @@ IF `D` is provided AND its value is not one of `no`, `always`, `unless-stopped`,
 
 The table below lists all meaningful flag combinations. `✓` = present, `∅` = absent/default, `✗` = forbidden.
 
-| Mode | P | A | T | K | R | N | C | V | D | S | U | Valid? |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ minimal start |
-| START | ✓ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ custom agents |
-| START | ✓ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ custom port |
-| START | ✓ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ custom SSH key |
-| START | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ force rebuild |
-| START | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ skip known_hosts update |
-| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ skip SSH config update |
-| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ verbose build output |
-| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ custom restart policy |
-| START | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ force rebuild + verbose |
-| START | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ∅ | ∅ | ✓ all start flags |
-| STOP  | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✓ |
-| PURGE | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✓ |
-| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✗ no mode, no path |
-| —     | ✓ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: A with S |
-| —     | ✓ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: T with S |
-| —     | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: R with S |
-| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: N with S |
-| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: C with S |
-| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✓ | ∅ | ✗ CLI-3: V with S |
-| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✓ | ∅ | ✗ CLI-3: D with S |
-| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-3: N with U |
-| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-3: C with U |
-| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ | ✗ CLI-3: V with U |
-| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✓ | ✗ CLI-3: D with U |
-| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✓ | ✗ CLI-1: S ∧ U |
-| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-2: P with U |
-| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-2: S without P |
+| Mode | P | A | T | K | R | N | C | V | D | H | S | U | Valid? |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ minimal start |
+| START | ✓ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ custom agents |
+| START | ✓ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ custom port |
+| START | ✓ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ custom SSH key |
+| START | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ force rebuild |
+| START | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ skip known_hosts update |
+| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ skip SSH config update |
+| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ verbose build output |
+| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ custom restart policy |
+| START | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ disable host network |
+| START | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ force rebuild + verbose |
+| START | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ∅ | ∅ | ✓ all start flags |
+| STOP  | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✓ |
+| PURGE | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✓ |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✗ no mode, no path |
+| —     | ✓ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: A with S |
+| —     | ✓ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: T with S |
+| —     | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: R with S |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: N with S |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: C with S |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-3: V with S |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✓ | ∅ | ✗ CLI-3: D with S |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✓ | ∅ | ✗ CLI-3: H with S |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-3: N with U |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-3: C with U |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-3: V with U |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ∅ | ✓ | ✗ CLI-3: D with U |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✓ | ✗ CLI-3: H with U |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✓ | ✗ CLI-1: S ∧ U |
+| —     | ✓ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ✗ CLI-2: P with U |
+| —     | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ∅ | ✓ | ∅ | ✗ CLI-2: S without P |

@@ -31,7 +31,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **Enabled_Agents**: The set of Agent modules selected by the user for a given Container, specified via CLI flag or tool configuration.
 - **Credential_Store**: The directory on the Host where an Agent's authentication tokens are persisted between Sessions. Each Agent module declares its own default Credential_Store path via the Agent_Interface.
 - **Credential_Volume**: The Docker bind-mount that makes an Agent's Credential_Store accessible inside the Container at the path the Agent expects.
-- **SSH_Port**: The host-side TCP port mapped to port 22 inside the Container. The CLI selects the SSH_Port by starting at `2222` and incrementing by 1 until a free port is found on the Host. The selected port is persisted in the Tool_Data_Dir for the project so the same port is reused on subsequent runs. Can be overridden per invocation via `--port`.
+- **SSH_Port**: The TCP port on which the SSH_Server is reachable from the Host at `127.0.0.1`. In host network mode (Req 26, default), sshd listens directly on this port inside the Container. In bridge mode (`--host-network-off`), Docker maps the Container's port 22 to this port on the Host. The CLI selects the SSH_Port by starting at `2222` and incrementing by 1 until a free port is found on the Host. The selected port is persisted in the Tool_Data_Dir for the project so the same port is reused on subsequent runs. Can be overridden per invocation via `--port`.
 - **Container_User_Home**: The home directory of the Container_User inside the Container. Defined as the Host_User's home directory path (e.g. `/home/alice`). This ensures absolute paths stored by tools resolve identically inside the Container and on the Host.
 - **Tool_Data_Dir**: The directory on the Host where the CLI stores all persistent data for a given project (SSH host keys, SSH port assignment, agent manifests). Located at `~/.config/bootstrap-ai-coding/<container-name>/`.
 - **Known_Hosts_File**: The SSH client's `~/.ssh/known_hosts` file on the Host.
@@ -79,8 +79,8 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 #### Acceptance Criteria
 
-1. WHEN a Container is started, THE SSH_Server SHALL be running and listening on port 22 inside the Container.
-2. WHILE the Container is running, THE SSH_Server SHALL accept incoming connections on the SSH_Port.
+1. WHEN a Container is started, THE SSH_Server SHALL be running and listening on the SSH_Port. In host network mode (Req 26, default), sshd listens on `127.0.0.1:<SSH_Port>` directly. In bridge mode (`--host-network-off`), sshd listens on port 22 and Docker maps it to the SSH_Port on the Host.
+2. WHILE the Container is running, THE SSH_Server SHALL accept incoming connections on the SSH_Port from localhost.
 3. IF the SSH_Server fails to start inside the Container, THEN THE CLI SHALL stop the Container, print a descriptive error message to stderr, and exit with a non-zero exit code.
 
 ---
@@ -227,7 +227,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 1. WHEN the CLI starts a Container for the first time, THE CLI SHALL select the SSH_Port by checking port `2222` on the Host; if it is in use, THE CLI SHALL increment by 1 and repeat until a free port is found.
 2. THE selected SSH_Port SHALL be persisted in the Tool_Data_Dir for the project so that subsequent invocations reuse the same port.
 3. THE CLI SHALL accept a `--port` flag that overrides the automatic SSH_Port selection for the Container; the overridden value SHALL also be persisted in the Tool_Data_Dir.
-4. WHEN a Container is started, THE CLI SHALL bind the Container's internal SSH port 22 to the SSH_Port on the Host.
+4. WHEN a Container is started, THE SSH_Server inside the Container SHALL be reachable on `127.0.0.1:<SSH_Port>` from the Host. In host network mode (Req 26), sshd listens directly on that address via sshd_config. In bridge mode, Docker port mapping binds the Container's port 22 to `127.0.0.1:<SSH_Port>` on the Host.
 5. IF the persisted SSH_Port is in use on the Host by a process other than the Container for this project when the Container is started, THE CLI SHALL print a descriptive error message to stderr identifying the port conflict and exit with a non-zero exit code.
 6. THE CLI SHALL print the SSH_Port and the full SSH connection command as part of the session summary defined in Requirement 17.
 
@@ -438,3 +438,26 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 8. IF the `--docker-restart-policy` flag is provided with an invalid value (not one of `no`, `always`, `unless-stopped`, `on-failure`), THEN THE CLI SHALL print a descriptive error message to stderr listing the valid values and exit with a non-zero exit code.
 9. THE `--docker-restart-policy` flag SHALL only be valid in START mode; it is a START-only flag subject to the CLI-3 constraint.
 10. WHEN a Container already exists and the CLI reconnects to it, THE CLI SHALL NOT modify the existing Container's restart policy — the policy is set only at Container creation time.
+
+---
+
+### Requirement 26: Host Network Mode
+
+**User Story:** As a developer, I want the container to share the host's network namespace by default, so that services running on the host (e.g. Vibe Kanban on localhost:3000) are directly accessible from inside the container, and services started inside the container are directly accessible from the host browser — without any additional port forwarding configuration. I also want the option to disable host networking and fall back to bridge mode with port mapping if needed.
+
+#### Acceptance Criteria
+
+1. THE CLI SHALL accept a `--host-network-off` flag (boolean, default: absent/false) that disables Docker host network mode. When `--host-network-off` is NOT set (the default), host network mode is active. When `--host-network-off` IS set, the Container uses bridge networking with port mapping.
+2. WHEN `--host-network-off` is NOT set (the default), THE CLI SHALL configure the Container with Docker host network mode (`NetworkMode: "host"`), so the Container shares the Host's network namespace.
+3. WHEN `--host-network-off` is NOT set, THE SSH_Server inside the Container SHALL be configured to listen on `127.0.0.1:<SSH_Port>` via sshd_config directives (`Port <SSH_Port>` and `ListenAddress 127.0.0.1`) instead of the default port 22.
+4. WHEN `--host-network-off` is NOT set, Docker port binding configuration (`PortBindings`, `ExposedPorts`) SHALL NOT be set on the Container — they are ignored by Docker in host network mode and would produce a warning.
+5. WHEN `--host-network-off` is NOT set, THE Container SHALL be able to reach any TCP/UDP service listening on the Host's loopback or external interfaces without additional configuration.
+6. WHEN `--host-network-off` IS set, THE CLI SHALL configure the Container with the default Docker bridge network and SHALL map the Container's internal SSH port (`constants.ContainerSSHPort`, port 22) to the SSH_Port on the Host via Docker port bindings (`HostIP: constants.HostBindIP`, `HostPort: SSH_Port`).
+7. WHEN `--host-network-off` IS set, THE SSH_Server inside the Container SHALL listen on port 22 (the default sshd port). The sshd_config SHALL NOT include `Port` or `ListenAddress` directives — sshd uses its defaults.
+8. THE existing SSH_Port selection logic (Requirement 12) SHALL remain unchanged regardless of `--host-network-off` — the port is auto-selected starting at `constants.SSHPortStart` (2222), incrementing until free, and persisted in the Tool_Data_Dir.
+9. THE `--port` flag SHALL continue to override the SSH_Port regardless of `--host-network-off`.
+10. THE `WaitForSSH` function SHALL connect to `127.0.0.1:<SSH_Port>` to verify SSH readiness in both modes (in host mode sshd listens directly on that port; in bridge mode Docker maps it).
+11. THE `HostBindIP` constant (`127.0.0.1`) SHALL be used as the sshd bind address in host mode and as the Docker port binding IP in bridge mode, ensuring SSH is only accessible from localhost in both cases.
+12. THE `--host-network-off` flag SHALL only be valid in START mode; it is a START-only flag subject to the CLI-3 constraint.
+13. THE `--host-network-off` value SHALL influence the Instance_Image build: when absent (host mode), sshd_config includes `Port <SSH_Port>` and `ListenAddress 127.0.0.1`; when set (bridge mode), these directives are omitted.
+14. WHEN `--host-network-off` is changed between invocations for the same project (e.g. added or removed), THE CLI SHALL require `--rebuild` to regenerate the Instance_Image with the correct sshd_config. IF the network mode has changed and `--rebuild` is not set, THE CLI SHALL print a message instructing the user to run with `--rebuild` and exit with a zero exit code.

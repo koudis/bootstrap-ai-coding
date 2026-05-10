@@ -21,6 +21,7 @@ import (
 	"github.com/docker/go-connections/nat"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
 // Mount represents a single Docker bind mount.
@@ -38,8 +39,7 @@ type ContainerSpec struct {
 	Mounts         []Mount           // All bind mounts: /workspace + per-agent credential stores
 	SSHPort        int               // SSH port (used in sshd_config for host mode, or Docker port mapping for bridge mode)
 	Labels         map[string]string // Docker labels for identification
-	HostUID        int               // Host user UID (passed as build arg for dev user)
-	HostGID        int               // Host user GID (passed as build arg for dev user)
+	HostInfo       *hostinfo.Info    // Req 22: runtime-resolved host user identity (UID, GID, Username, HomeDir)
 	NoCache        bool              // When true, disable Docker layer cache during image build
 	HostNetworkOff bool              // Req 26: when true, use bridge mode; when false (default), use host network
 	RestartPolicy  string            // Docker restart policy (e.g. "unless-stopped"); empty means use default

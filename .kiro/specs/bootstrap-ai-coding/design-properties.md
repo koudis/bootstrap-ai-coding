@@ -291,7 +291,7 @@
 
 #### Property 34: START-only flags in STOP or PURGE mode always produce errors (CLI-3)
 
-*For any* invocation in STOP or PURGE mode where any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, or `--no-update-ssh-config` is set, the CLI SHALL return a non-nil error identifying the incompatible flag(s).
+*For any* invocation in STOP or PURGE mode where any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config`, `--verbose`, `--docker-restart-policy`, or `--host-network-off` is set, the CLI SHALL return a non-nil error identifying the incompatible flag(s).
 
 **Validates: CLI-3**
 

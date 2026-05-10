@@ -59,8 +59,9 @@ type ContainerSpec struct {
     Mounts         []Mount
     SSHPort        int
     Labels         map[string]string
-    RestartPolicy  string             // Req 25: Docker restart policy name
+    NoCache        bool               // When true, disable Docker layer cache during image build
     HostNetworkOff bool               // Req 26: when true, use bridge mode; when false (default), use host network
+    RestartPolicy  string             // Req 25: Docker restart policy name
     HostInfo       *hostinfo.Info     // Req 22: runtime-resolved host user identity (UID, GID, Username, HomeDir)
 }
 

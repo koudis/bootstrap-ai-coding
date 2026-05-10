@@ -33,8 +33,7 @@ var (
 	sharedImageTag  string
 	sharedClient    *docker.Client
 	sharedProjectDir string
-	sharedHostUID   int
-	sharedHostGID   int
+	sharedHostInfo  *hostinfo.Info
 )
 
 // TestMain ensures the base image is removed from the local Docker image store
@@ -78,15 +77,14 @@ func buildSharedImage(t *testing.T) {
 
 	info, err := hostinfo.Current()
 	require.NoError(t, err, "getting host info")
-	sharedHostUID = info.UID
-	sharedHostGID = info.GID
+	sharedHostInfo = info
 
 	sharedClient, err = docker.NewClient()
 	require.NoError(t, err, "connecting to Docker daemon")
 
 	strategy := docker.UserStrategyCreate
 	conflictingUser := ""
-	conflictingImageUser, err := docker.FindConflictingUser(ctx, sharedClient, sharedHostUID, sharedHostGID)
+	conflictingImageUser, err := docker.FindConflictingUser(ctx, sharedClient, sharedHostInfo.UID, sharedHostInfo.GID)
 	require.NoError(t, err, "checking base image for UID/GID conflicts")
 	if conflictingImageUser != nil {
 		strategy = docker.UserStrategyRename
@@ -115,8 +113,7 @@ func buildSharedImage(t *testing.T) {
 		ImageTag:   constants.BaseImageTag,
 		Dockerfile: builder.Build(),
 		Labels:     map[string]string{"bac.managed": "true"},
-		HostUID:    sharedHostUID,
-		HostGID:    sharedHostGID,
+		HostInfo: sharedHostInfo,
 	}
 
 	_, err = docker.BuildImage(ctx, sharedClient, baseSpec, false)
@@ -131,8 +128,7 @@ func buildSharedImage(t *testing.T) {
 			{HostPath: sharedProjectDir, ContainerPath: constants.WorkspaceMountPath},
 		},
 		Labels:  map[string]string{"bac.managed": "true"},
-		HostUID: sharedHostUID,
-		HostGID: sharedHostGID,
+		HostInfo: sharedHostInfo,
 	}
 
 	_, err = docker.BuildImage(ctx, sharedClient, spec, false)
@@ -165,8 +161,7 @@ func startContainerFromSharedImage(t *testing.T) (containerName string, sshPort 
 		},
 		SSHPort:        port,
 		Labels:         map[string]string{"bac.managed": "true"},
-		HostUID:        sharedHostUID,
-		HostGID:        sharedHostGID,
+		HostInfo: sharedHostInfo,
 		HostNetworkOff: true,
 	}
 
@@ -408,8 +403,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			ImageTag:   constants.BaseImageTag,
 			Dockerfile: builder.Build(),
 			Labels:     map[string]string{"bac.managed": "true"},
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 		}
 
 		_, err = docker.BuildImage(ctx, client, baseSpec, false)
@@ -432,8 +426,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			},
 			SSHPort: port,
 			Labels:  map[string]string{"bac.managed": "true"},
-			HostUID: info.UID,
-			HostGID: info.GID,
+			HostInfo: info,
 		}
 
 		_, err = docker.BuildImage(ctx, client, spec, false)
@@ -691,8 +684,7 @@ func TestHostNetworkModeSSHReachable(t *testing.T) {
 		ImageTag:   constants.BaseImageTag,
 		Dockerfile: baseBuilder.Build(),
 		Labels:     map[string]string{"bac.managed": "true"},
-		HostUID:    info.UID,
-		HostGID:    info.GID,
+		HostInfo: info,
 	}
 
 	_, err = docker.BuildImage(ctx, client, baseSpec, false)
@@ -711,8 +703,7 @@ func TestHostNetworkModeSSHReachable(t *testing.T) {
 		},
 		SSHPort:        sshPort,
 		Labels:         map[string]string{"bac.managed": "true"},
-		HostUID:        info.UID,
-		HostGID:        info.GID,
+		HostInfo: info,
 		HostNetworkOff: false, // host network mode
 	}
 
@@ -805,8 +796,7 @@ func TestHostNetworkCanReachHostService(t *testing.T) {
 		ImageTag:   constants.BaseImageTag,
 		Dockerfile: baseBuilder.Build(),
 		Labels:     map[string]string{"bac.managed": "true"},
-		HostUID:    info.UID,
-		HostGID:    info.GID,
+		HostInfo: info,
 	}
 
 	_, err = docker.BuildImage(ctx, client, baseSpec, false)
@@ -825,8 +815,7 @@ func TestHostNetworkCanReachHostService(t *testing.T) {
 		},
 		SSHPort:        sshPort,
 		Labels:         map[string]string{"bac.managed": "true"},
-		HostUID:        info.UID,
-		HostGID:        info.GID,
+		HostInfo: info,
 		HostNetworkOff: false, // host network mode
 	}
 
@@ -919,8 +908,7 @@ func TestBridgeModeSSHReachable(t *testing.T) {
 		ImageTag:   constants.BaseImageTag,
 		Dockerfile: baseBuilder.Build(),
 		Labels:     map[string]string{"bac.managed": "true"},
-		HostUID:    info.UID,
-		HostGID:    info.GID,
+		HostInfo: info,
 	}
 
 	_, err = docker.BuildImage(ctx, client, baseSpec, false)
@@ -939,8 +927,7 @@ func TestBridgeModeSSHReachable(t *testing.T) {
 		},
 		SSHPort:        sshPort,
 		Labels:         map[string]string{"bac.managed": "true"},
-		HostUID:        info.UID,
-		HostGID:        info.GID,
+		HostInfo: info,
 		HostNetworkOff: true, // bridge mode
 	}
 
@@ -1077,8 +1064,7 @@ func TestTwoLayerBuildCycle(t *testing.T) {
 		ImageTag:   constants.BaseImageTag,
 		Dockerfile: baseBuilder.Build(),
 		Labels:     baseLabels,
-		HostUID:    info.UID,
-		HostGID:    info.GID,
+		HostInfo: info,
 	}
 
 	_, err = docker.BuildImage(ctx, client, baseSpec, false)
@@ -1111,8 +1097,7 @@ func TestTwoLayerBuildCycle(t *testing.T) {
 		},
 		SSHPort:        port,
 		Labels:         instanceLabels,
-		HostUID:        info.UID,
-		HostGID:        info.GID,
+		HostInfo: info,
 		HostNetworkOff: true,
 	}
 

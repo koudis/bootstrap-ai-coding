@@ -594,8 +594,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   constants.BaseImageTag,
 			Dockerfile: baseBuilder.Build(),
 			Labels:     baseLabels,
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 			NoCache:    flagRebuild,
 		}
 
@@ -619,8 +618,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   imageTag,
 			Dockerfile: instanceBuilder.Build(),
 			Labels:     labels,
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 		}
 
 		fmt.Println("Building instance image...")

@@ -358,17 +358,17 @@ hostConfig := &container.HostConfig{
 **`--host-network-off` flag (Req 26):**
 
 ```go
-rootCmd.Flags().Bool("host-network-off", false,
-    "Disable host network mode; use bridge networking with port mapping instead")
+rootCmd.Flags().BoolVar(&flagHostNetworkOff, "host-network-off", false,
+    "Disable host network mode; use bridge networking with port mapping")
 ```
 
 **Threading from CLI to runner:**
 
 1. `cmd/root.go` reads `--host-network-off` flag value (default: `false`)
-2. Stores it in `Config.HostNetworkOff`
-3. Passes it to `ContainerSpec.HostNetworkOff` when constructing the spec
+2. Passes it as the `hostNetworkOff` parameter to `runStart`
+3. `runStart` sets `ContainerSpec.HostNetworkOff` when constructing the spec
 4. `docker/runner.go` selects `NetworkMode: "host"` or bridge + port bindings in `CreateContainer`
-5. Passes it to `NewInstanceImageBuilder` to control whether sshd_config includes `Port`/`ListenAddress` directives
+5. `runStart` passes it to `NewInstanceImageBuilder` to control whether sshd_config includes `Port`/`ListenAddress` directives
 
 **Behaviour with `--stop-and-remove`:**
 

@@ -133,7 +133,21 @@ No change to image handling. Only the container is stopped/removed. Both Base_Im
 
 ### `--purge` Behavior
 
-Removes all images (both `bac-base:latest` and all `bac-<name>:latest` instance images) via the existing `bac.managed` label filter.
+Image removal proceeds in dependency order:
+
+1. Remove Instance_Images (have `bac.container` label) — children of Base_Image
+2. `ImagesPrune(dangling=true)` — removes untagged intermediate build layers that still reference Base_Image
+3. Remove Base_Image (no `bac.container` label) — suppress "No such image" errors (image already removed by prune in step 2)
+
+Docker refuses to delete a parent image while children exist. Dangling build cache layers count as children. "No such image" errors in step 3 are skipped because the prune already removed those images.
+
+#### Reasoning
+
+- **`bac.container` label as partition key:** All bac-managed images carry `bac.managed=true`. Instance_Images additionally carry `bac.container=<name>`. This distinguishes children from parent without inspecting image ancestry or parsing FROM directives at runtime.
+- **Dangling prune between steps 1 and 3:** `--rebuild` creates new layers and old Instance_Image layers become dangling (untagged). These still reference `bac-base` as their parent in Docker's image graph. Without pruning, Base_Image removal fails with "image has dependent child images." The `dangling=true` filter only removes untagged, unreferenced images — it cannot remove tagged images from other tools.
+- **Suppressing "No such image":** The prune in step 2 may remove images that were in the original image list (captured before removal began). Step 3 then attempts to remove an already-gone image. This is the desired outcome, so the error is skipped.
+
+**Validates: TL-7**
 
 ### Constants Addition
 

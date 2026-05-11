@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -366,12 +367,45 @@ func runPurge(c *dockerpkg.Client) error {
 		}
 	}
 
+	// Remove images in dependency order: instance images (children) first, then
+	// prune dangling intermediate layers, then the base image (parent).
+	var instanceImages, baseImages []image.Summary
 	for _, img := range images {
+		if img.Labels["bac.container"] != "" {
+			instanceImages = append(instanceImages, img)
+		} else {
+			baseImages = append(baseImages, img)
+		}
+	}
+
+	for _, img := range instanceImages {
 		tag := img.ID
 		if len(img.RepoTags) > 0 {
 			tag = img.RepoTags[0]
 		}
 		if _, err := c.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
+		}
+	}
+
+	// Prune dangling images (untagged intermediate build layers that may still
+	// reference bac-base as their parent).
+	danglingFilter := filters.NewArgs()
+	danglingFilter.Add("dangling", "true")
+	if _, err := c.ImagesPrune(ctx, danglingFilter); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: pruning dangling images: %v\n", err)
+	}
+
+	for _, img := range baseImages {
+		tag := img.ID
+		if len(img.RepoTags) > 0 {
+			tag = img.RepoTags[0]
+		}
+		if _, err := c.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			// Skip "No such image" — already removed by the dangling prune step.
+			if strings.Contains(err.Error(), "No such image") {
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
 		}
 	}

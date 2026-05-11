@@ -121,6 +121,7 @@ This feature splits the current monolithic Container_Image build (core Req 14) i
 2. IF confirmed: stop/remove all bac-managed containers, remove all bac-managed images (Base_Image + all Instance_Images), delete Tool_Data_Dir root, remove all Known_Hosts_Entries, remove all SSH_Config_Entries.
 3. IF not confirmed, print "Purge cancelled." and exit 0.
 4. IF removal of an individual item fails, print warning to stderr and continue.
+5. Image removal SHALL proceed in dependency order: Instance_Images (children, identified by `bac.container` label) SHALL be removed before Base_Image (parent). This prevents Docker's "image has dependent child images" error.
 
 ### Requirement TL-8: Agent Manifest Change Detection
 

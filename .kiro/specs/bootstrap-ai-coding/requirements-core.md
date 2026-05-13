@@ -443,7 +443,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 ### Requirement 26: Host Network Mode
 
-**User Story:** As a developer, I want the container to share the host's network namespace by default, so that services running on the host (e.g. Vibe Kanban on localhost:3000) are directly accessible from inside the container, and services started inside the container are directly accessible from the host browser — without any additional port forwarding configuration. I also want the option to disable host networking and fall back to bridge mode with port mapping if needed.
+**User Story:** As a developer, I want the container to share the host's network namespace by default, so that services running on the host are directly accessible from inside the container, and services started inside the container are directly accessible from the host browser — without any additional port forwarding configuration. I also want the option to disable host networking and fall back to bridge mode with port mapping if needed.
 
 #### Acceptance Criteria
 

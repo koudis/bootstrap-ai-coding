@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -50,7 +51,7 @@ func RunPurgeWith(api PurgeDockerAPI) error {
 	for _, ctr := range containers {
 		_ = api.ContainerStop(ctx, ctr.ID, container.StopOptions{})
 		if err := api.ContainerRemove(ctx, ctr.ID, container.RemoveOptions{Force: true}); err != nil {
-			fmt.Printf("warning: removing container %s: %v\n", ctr.ID, err)
+			fmt.Fprintf(os.Stderr, "warning: removing container %s: %v\n", ctr.ID, err)
 		}
 	}
 
@@ -74,7 +75,7 @@ func RunPurgeWith(api PurgeDockerAPI) error {
 			if len(img.RepoTags) > 0 {
 				tag = img.RepoTags[0]
 			}
-			fmt.Printf("warning: removing image %s: %v\n", tag, err)
+			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
 		}
 	}
 
@@ -83,7 +84,7 @@ func RunPurgeWith(api PurgeDockerAPI) error {
 	danglingFilter := filters.NewArgs()
 	danglingFilter.Add("dangling", "true")
 	if _, err := api.ImagesPrune(ctx, danglingFilter); err != nil {
-		fmt.Printf("warning: pruning dangling images: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: pruning dangling images: %v\n", err)
 	}
 
 	// 3. Remove base image(s) now that children are gone.
@@ -93,7 +94,7 @@ func RunPurgeWith(api PurgeDockerAPI) error {
 			if len(img.RepoTags) > 0 {
 				tag = img.RepoTags[0]
 			}
-			fmt.Printf("warning: removing image %s: %v\n", tag, err)
+			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
 		}
 	}
 

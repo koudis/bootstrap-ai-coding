@@ -21,11 +21,11 @@ package aider
 
 import (
     "context"
+    "fmt"
     "os"
     "path/filepath"
 
     "github.com/koudis/bootstrap-ai-coding/internal/agent"
-    "github.com/koudis/bootstrap-ai-coding/internal/constants"
     "github.com/koudis/bootstrap-ai-coding/internal/docker"
 )
 
@@ -55,9 +55,9 @@ func (a *aiderAgent) CredentialStorePath() string {
 }
 
 // ContainerMountPath returns where credentials are mounted inside the container.
-// Always use constants.ContainerUserHome as the base — never hardcode "/home/dev".
-func (a *aiderAgent) ContainerMountPath() string {
-    return filepath.Join(constants.ContainerUserHome, ".aider")
+// The homeDir parameter is the container user's home directory (from hostinfo.Info.HomeDir).
+func (a *aiderAgent) ContainerMountPath(homeDir string) string {
+    return filepath.Join(homeDir, ".aider")
 }
 
 // HasCredentials reports whether the credential store contains valid auth tokens.
@@ -149,7 +149,7 @@ Add a new section to `.kiro/specs/bootstrap-ai-coding/requirements-agents.md` fo
 | `ID()` | Unique, stable, kebab-case string (e.g. `"claude-code"`, `"aider"`) |
 | `Install(b)` | Appends `RUN` steps to `b`; must be idempotent and self-contained |
 | `CredentialStorePath()` | Default host path for auth tokens; may use `~/` prefix |
-| `ContainerMountPath()` | Absolute path inside container; use `constants.ContainerUserHome` as base |
+| `ContainerMountPath(homeDir)` | Absolute path inside container; `homeDir` is the container user's home (from `hostinfo.Info.HomeDir`) |
 | `HasCredentials(path)` | `(true, nil)` if tokens exist; `(false, nil)` if empty; `(false, err)` on error |
 | `HealthCheck(ctx, c, id)` | `nil` if agent is ready; non-nil error if not. `c` is the existing `*docker.Client` — do not create a new one. |
 
@@ -158,12 +158,12 @@ Add a new section to `.kiro/specs/bootstrap-ai-coding/requirements-agents.md` fo
 Agent modules may import:
 - `github.com/koudis/bootstrap-ai-coding/internal/agent` — to call `agent.Register()`
 - `github.com/koudis/bootstrap-ai-coding/internal/docker` — for `*docker.DockerfileBuilder` and `*docker.Client`
-- `github.com/koudis/bootstrap-ai-coding/internal/constants` — for `ContainerUserHome` and other glossary values
+- `github.com/koudis/bootstrap-ai-coding/internal/constants` — for glossary values
 - `github.com/koudis/bootstrap-ai-coding/internal/pathutil` — for `ExpandHome` if needed
 - Standard library packages
 
 Agent modules must **NOT** import:
-- `cmd`, `naming`, `ssh`, `datadir`, `docker/runner`
+- `cmd`, `naming`, `ssh`, `datadir`, `docker/runner`, `hostinfo`
 - Any other agent module
 
 ## Naming Convention

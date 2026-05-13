@@ -91,7 +91,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 #### Acceptance Criteria
 
-1. THE CLI SHALL read the user's Public_Key from `~/.ssh/id_ed25519.pub`, `~/.ssh/id_rsa.pub`, or a path supplied via a `--ssh-key` option, in that order of precedence.
+1. THE CLI SHALL read the user's Public_Key from a path supplied via the `--ssh-key` option (highest precedence), or from `~/.ssh/id_ed25519.pub`, or from `~/.ssh/id_rsa.pub`, in that order of precedence (first found wins).
 2. WHEN a Container is started, THE CLI SHALL install the Public_Key into the Container's `~/.ssh/authorized_keys` for the Container_User.
 3. WHEN a user connects to the SSH_Server using the corresponding private key, THE SSH_Server SHALL authenticate the connection without prompting for a password.
 4. IF no Public_Key can be located, THEN THE CLI SHALL print a descriptive error message to stderr and exit with a non-zero exit code.
@@ -142,7 +142,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 2. THE Agent_Registry SHALL allow Agent modules to register themselves without requiring changes to core system code. Adding a new Agent SHALL require only a new module that implements the Agent_Interface and registers itself.
 3. IF an Agent identifier supplied by the user is not found in the Agent_Registry, THEN THE CLI SHALL print a descriptive error message to stderr listing the unknown identifier and exit with a non-zero exit code.
 4. THE CLI SHALL accept an `--agents` flag whose value is a comma-separated list of Agent identifiers specifying the Enabled_Agents for the Container.
-5. WHEN the `--agents` flag is omitted, THE CLI SHALL enable both `claude-code` and `augment-code` as the default Enabled_Agents (i.e. the default value of `--agents` is `"claude-code,augment-code"`).
+5. WHEN the `--agents` flag is omitted, THE CLI SHALL enable `claude-code`, `augment-code`, and `build-resources` as the default Enabled_Agents (i.e. the default value of `--agents` is `constants.DefaultAgents`). See also BR-6 in `requirements-agents.md`.
 
 ---
 

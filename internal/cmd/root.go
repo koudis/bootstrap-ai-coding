@@ -261,56 +261,8 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func modeFlag(m Mode) string {
-	if m == ModeStop {
-		return "--stop-and-remove"
-	}
-	return "--purge"
-}
-
 func runStop(c *dockerpkg.Client, projectPath string) error {
-	existingNames, err := dockerpkg.ListBACContainerNames(context.Background(), c)
-	if err != nil {
-		return fmt.Errorf("listing existing containers: %w", err)
-	}
-	containerName, err := naming.ContainerName(projectPath, existingNames)
-	if err != nil {
-		return fmt.Errorf("deriving container name: %w", err)
-	}
-	info, err := dockerpkg.InspectContainer(context.Background(), c, containerName)
-	if err != nil {
-		return err
-	}
-	if info == nil {
-		fmt.Printf("No container found for project %s\n", projectPath)
-		return nil
-	}
-	if err := dockerpkg.StopContainer(context.Background(), c, containerName); err != nil {
-		if !strings.Contains(err.Error(), "not running") {
-			return err
-		}
-	}
-	if err := dockerpkg.RemoveContainer(context.Background(), c, containerName); err != nil {
-		return err
-	}
-	fmt.Printf("Container %s stopped and removed.\n", containerName)
-
-	// Remove known_hosts entries for this project's SSH port (Req 18.7).
-	dd, err := datadir.New(containerName)
-	if err == nil {
-		if port, err := dd.ReadPort(); err == nil && port != 0 {
-			if khErr := sshpkg.RemoveKnownHostsEntries(port); khErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: removing known_hosts entries: %v\n", khErr)
-			}
-		}
-	}
-
-	// Remove SSH config entry for this container (Req 19.7).
-	if cfgErr := sshpkg.RemoveSSHConfigEntry(containerName); cfgErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: removing SSH config entry: %v\n", cfgErr)
-	}
-
-	return nil
+	return RunStopWith(c, projectPath)
 }
 
 func runPurge(c *dockerpkg.Client) error {

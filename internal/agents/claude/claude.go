@@ -150,3 +150,7 @@ func (a *claudeAgent) HealthCheck(ctx context.Context, c *docker.Client, contain
 	}
 	return nil
 }
+
+func (a *claudeAgent) SummaryInfo(ctx context.Context, c *docker.Client, containerID string) ([]agent.KeyValue, error) {
+	return nil, nil
+}

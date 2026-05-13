@@ -8,6 +8,7 @@ import (
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/vibekanban"
 )
 
 func main() {

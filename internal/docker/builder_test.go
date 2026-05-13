@@ -1498,3 +1498,22 @@ func TestInstanceImageSSHDConfigHostNetwork(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests for Entrypoint builder method
+// Validates: VK-3.1
+// ---------------------------------------------------------------------------
+
+func TestBuilderEntrypointSingleArg(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	b.Entrypoint("/usr/local/bin/bac-entrypoint.sh")
+	content := b.Build()
+	require.Contains(t, content, `ENTRYPOINT ["/usr/local/bin/bac-entrypoint.sh"]`)
+}
+
+func TestBuilderEntrypointMultiArg(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	b.Entrypoint("/bin/sh", "-c", "start.sh")
+	content := b.Build()
+	require.Contains(t, content, `ENTRYPOINT ["/bin/sh", "-c", "start.sh"]`)
+}

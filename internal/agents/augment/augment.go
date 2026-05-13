@@ -94,3 +94,10 @@ func (a *augmentAgent) HealthCheck(ctx context.Context, c *docker.Client, contai
 	}
 	return nil
 }
+
+// SummaryInfo returns no additional session summary information for the
+// Augment Code agent.
+// Satisfies: SI-6.2
+func (a *augmentAgent) SummaryInfo(ctx context.Context, c *docker.Client, containerID string) ([]agent.KeyValue, error) {
+	return nil, nil
+}

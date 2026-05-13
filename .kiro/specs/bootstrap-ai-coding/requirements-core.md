@@ -26,7 +26,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 - **Conflicting_Image_User**: An existing user in the Base_Container_Image whose UID or GID matches the Host_User's UID or GID. If present, must be resolved before the Container_Image can be built (see Requirement 10a).
 - **Container_Image**: The Docker image built on top of the Base_Container_Image that includes the SSH server, the Container_User setup, and all Enabled_Agent installations.
 - **Agent**: An AI coding assistant module that conforms to the Agent_Interface and can be installed, authenticated, and invoked inside the Container.
-- **Agent_Interface**: The contract defined by the core that every Agent module must satisfy. It covers: unique identification, Dockerfile installation steps, credential store location on the Host, credential mount path inside the Container, credential presence check, and a readiness health check.
+- **Agent_Interface**: The contract defined by the core that every Agent module must satisfy. It covers: unique identification, Dockerfile installation steps, credential store location on the Host, credential mount path inside the Container, credential presence check, a readiness health check, and a summary info method that returns key:value pairs for the session summary.
 - **Agent_Registry**: The core component that holds all registered Agent modules and resolves them by ID at runtime.
 - **Enabled_Agents**: The set of Agent modules selected by the user for a given Container, specified via CLI flag or tool configuration.
 - **Credential_Store**: The directory on the Host where an Agent's authentication tokens are persisted between Sessions. Each Agent module declares its own default Credential_Store path via the Agent_Interface.
@@ -138,7 +138,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 
 #### Acceptance Criteria
 
-1. THE core SHALL define an Agent_Interface that every Agent module must implement. The interface SHALL cover at minimum: a unique string identifier, Dockerfile installation steps, the default Credential_Store path on the Host, the mount path inside the Container, a credential presence check, and a readiness health check.
+1. THE core SHALL define an Agent_Interface that every Agent module must implement. The interface SHALL cover at minimum: a unique string identifier, Dockerfile installation steps, the default Credential_Store path on the Host, the mount path inside the Container, a credential presence check, a readiness health check, and a summary info method that returns key:value pairs for the session summary.
 2. THE Agent_Registry SHALL allow Agent modules to register themselves without requiring changes to core system code. Adding a new Agent SHALL require only a new module that implements the Agent_Interface and registers itself.
 3. IF an Agent identifier supplied by the user is not found in the Agent_Registry, THEN THE CLI SHALL print a descriptive error message to stderr listing the unknown identifier and exit with a non-zero exit code.
 4. THE CLI SHALL accept an `--agents` flag whose value is a comma-separated list of Agent identifiers specifying the Enabled_Agents for the Container.
@@ -303,6 +303,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
    - **SSH port**: the SSH_Port
    - **SSH connect**: the SSH alias command (e.g. `ssh bac-<container-name>`), which relies on the SSH_Config_Entry maintained by Requirement 19
    - **Enabled agents**: the list of Enabled_Agent identifiers
+   - **Agent-contributed fields**: any key:value pairs returned by Enabled_Agents via their `SummaryInfo()` method (see SI-2 in requirements-agents.md)
 3. THE session summary SHALL be printed as plain text to stdout, with one field per line.
 4. THE session summary SHALL be printed after all startup checks pass and the Container is confirmed ready.
 

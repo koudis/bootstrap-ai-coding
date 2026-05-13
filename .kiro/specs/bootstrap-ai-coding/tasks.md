@@ -1,150 +1,103 @@
-# Implementation Plan: Vibe Kanban Agent Module
+# Implementation Plan: Agent Summary Info
 
 ## Overview
 
-Implement the Vibe Kanban agent module (`internal/agents/vibekanban/`) — a web-based project management tool that runs as a background service inside the container. The implementation adds the agent constant, extends the DockerfileBuilder with an `Entrypoint()` method, adds `ExecInContainerWithOutput()` to the runner, creates the agent module with auto-start via ENTRYPOINT wrapper + supervisor script, extends the session summary with the Vibe Kanban URL, and integrates port discovery into `runStart()`.
+Refactor the session summary mechanism so that agent modules contribute their own key:value pairs via a generic `SummaryInfo` method on the `Agent` interface. This removes all Vibe Kanban–specific logic from the core (`internal/cmd/root.go`), restoring the architectural rule that "core has zero knowledge of agents."
 
 ## Tasks
 
-- [ ] 1. Add Vibe Kanban constant and update DefaultAgents
-  - [ ] 1.1 Add `VibeKanbanAgentName` constant and update `DefaultAgents` in `internal/constants/constants.go`
-    - Add `VibeKanbanAgentName = "vibe-kanban"` constant with comment referencing VK-1
-    - Update `DefaultAgents` to append `"," + VibeKanbanAgentName` to the existing value
-    - _Requirements: VK-1.1, VK-7.1_
+- [x] 1. Extend the Agent interface and add KeyValue type
+  - [x] 1.1 Add `KeyValue` struct and `SummaryInfo` method to the Agent interface
+    - Add `KeyValue` struct with `Key string` and `Value string` fields to `internal/agent/agent.go`
+    - Add `SummaryInfo(ctx context.Context, c *docker.Client, containerID string) ([]KeyValue, error)` to the `Agent` interface
+    - _Requirements: SI-1.1, SI-1.2, SI-1.3, SI-1.4_
 
-- [ ] 2. Extend DockerfileBuilder with Entrypoint method
-  - [ ] 2.1 Add `Entrypoint()` method to `DockerfileBuilder` in `internal/docker/builder.go`
-    - Implement `Entrypoint(args ...string)` that appends an `ENTRYPOINT [...]` instruction in exec form
-    - Each arg is quoted with `fmt.Sprintf("%q", a)` and joined with `", "`
-    - _Requirements: VK-3.1_
+- [x] 2. Implement no-op SummaryInfo in existing agents
+  - [x] 2.1 Implement `SummaryInfo` returning `(nil, nil)` in the Claude Code agent
+    - Add `SummaryInfo` method to `claudeAgent` in `internal/agents/claude/claude.go`
+    - Add necessary imports (`context`, `agent` package reference for `KeyValue`)
+    - _Requirements: SI-6.1_
 
-  - [ ]* 2.2 Write unit tests for `Entrypoint()` method in `internal/docker/builder_test.go`
-    - Test single-arg entrypoint produces correct exec-form instruction
-    - Test multi-arg entrypoint produces correct exec-form instruction
-    - _Requirements: VK-3.1_
+  - [x] 2.2 Implement `SummaryInfo` returning `(nil, nil)` in the Augment Code agent
+    - Add `SummaryInfo` method to `augmentAgent` in `internal/agents/augment/augment.go`
+    - _Requirements: SI-6.2_
 
-- [ ] 3. Add ExecInContainerWithOutput helper to runner
-  - [ ] 3.1 Add `ExecInContainerWithOutput()` function to `internal/docker/runner.go`
-    - Implement function that runs a command inside a container and returns `(exitCode int, stdout string, err error)`
-    - Use `ContainerExecCreate` with `AttachStdout: true, AttachStderr: true`
-    - Use `ContainerExecAttach` and `stdcopy.StdCopy` to separate stdout from stderr
-    - Use `ContainerExecInspect` to get the exit code
-    - Add necessary imports: `"github.com/docker/docker/pkg/stdcopy"`
-    - _Requirements: VK-8.2_
+  - [x] 2.3 Implement `SummaryInfo` returning `(nil, nil)` in the Build Resources agent
+    - Add `SummaryInfo` method to `buildResourcesAgent` in `internal/agents/buildresources/buildresources.go`
+    - _Requirements: SI-6.3_
 
-- [ ] 4. Checkpoint - Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
+- [x] 3. Implement SummaryInfo in the Vibe Kanban agent
+  - [x] 3.1 Move port discovery logic into `vibekanban.SummaryInfo()`
+    - Add `portRegexp` variable to `internal/agents/vibekanban/vibekanban.go`
+    - Implement `SummaryInfo` method with the same retry logic (30s deadline, 2s intervals, `ss -tlnp` parsing) currently in `discoverVibeKanbanPort()`
+    - Return `[]agent.KeyValue{{Key: "Vibe Kanban", Value: "http://localhost:<port>"}}` on success
+    - Return error on timeout
+    - Add `"regexp"` and `"strconv"` imports to `vibekanban.go`
+    - _Requirements: SI-5.1, SI-5.2, SI-5.3, SI-5.4_
 
-- [ ] 5. Create the Vibe Kanban agent module
-  - [ ] 5.1 Create `internal/agents/vibekanban/vibekanban.go` with full agent implementation
-    - Implement `vibeKanbanAgent` struct with `init()` calling `agent.Register()`
-    - Implement `ID()` returning `constants.VibeKanbanAgentName`
-    - Implement `Install(b *docker.DockerfileBuilder)`:
-      - Conditional Node.js installation (check `b.IsNodeInstalled()`, install Node.js 22 if not, call `b.MarkNodeInstalled()`)
-      - `npm install -g --no-fund --no-audit vibe-kanban`
-      - Generate supervisor script with crash recovery (MAX_RESTARTS=5, WINDOW_SECONDS=60, DELAY_SECONDS=5), replacing `__USERNAME__` with `b.Username()`
-      - Generate entrypoint wrapper script (`bac-entrypoint.sh`) that starts supervisor in background then `exec "$@"`
-      - Call `b.Entrypoint("/usr/local/bin/bac-entrypoint.sh")`
-    - Implement `CredentialStorePath()` returning `""`
-    - Implement `ContainerMountPath(homeDir string)` returning `""`
-    - Implement `HasCredentials(storePath string)` returning `(true, nil)`
-    - Implement `HealthCheck(ctx, c, containerID)`:
-      - Check 1: `vibe-kanban --version` exits 0 (binary presence)
-      - Check 2: `pgrep -f vibe-kanban` with up to 5 retries at 2-second intervals (process running)
-    - _Requirements: VK-1.1, VK-1.3, VK-2.1, VK-2.2, VK-2.4, VK-3.1, VK-3.2, VK-3.5, VK-3.6, VK-4.1, VK-4.2, VK-4.3, VK-5.1, VK-5.2_
+- [x] 4. Checkpoint - Verify compilation
+  - Ensure all tests pass (`go build ./...`), ask the user if questions arise.
 
-  - [ ] 5.2 Add blank import in `main.go` for the vibekanban package
-    - Add `_ "github.com/koudis/bootstrap-ai-coding/internal/agents/vibekanban"` to the import block
-    - _Requirements: VK-1.3, VK-6.2_
+- [x] 5. Update SessionSummary and FormatSessionSummary
+  - [x] 5.1 Replace `VibeKanbanURL` with `AgentInfo` in `SessionSummary` and update `FormatSessionSummary`
+    - Remove `VibeKanbanURL string` field from `SessionSummary` struct in `internal/cmd/root.go`
+    - Add `AgentInfo []agent.KeyValue` field to `SessionSummary` struct
+    - Replace the Vibe Kanban conditional in `FormatSessionSummary` with a generic loop: `fmt.Fprintf(&sb, "%-17s%s\n", kv.Key+":", kv.Value)` for each entry in `AgentInfo`
+    - _Requirements: SI-4.1, SI-4.4, SI-7.1, SI-7.2, SI-7.3, SI-7.4_
 
-- [ ] 6. Extend SessionSummary and integrate port discovery
-  - [ ] 6.1 Add `VibeKanbanURL` field to `SessionSummary` struct and update `FormatSessionSummary` in `internal/cmd/root.go`
-    - Add `VibeKanbanURL string` field to `SessionSummary`
-    - Update `FormatSessionSummary` to use `strings.Builder` and conditionally include "Vibe Kanban:" line when `VibeKanbanURL` is non-empty
-    - _Requirements: VK-8.3, VK-8.4_
+- [x] 6. Update core collection logic and remove VK-specific code from root.go
+  - [x] 6.1 Add generic agent info collection loop and update `printSessionSummary`
+    - Add a collection loop in `runStart()` (both reconnect and fresh-start paths) that iterates over `enabledAgents`, calls `SummaryInfo()`, collects `[]agent.KeyValue`, and prints warnings on error
+    - Update `printSessionSummary` signature: replace `vibeKanbanURL string` parameter with `agentInfo []agent.KeyValue`
+    - Pass collected `agentInfo` to `printSessionSummary` and store in `SessionSummary.AgentInfo`
+    - _Requirements: SI-2.1, SI-2.2, SI-2.3, SI-2.4, SI-3.1, SI-3.2, SI-3.3, SI-3.4_
 
-  - [ ] 6.2 Add `discoverVibeKanbanPort()` function and integrate into `runStart()` in `internal/cmd/root.go`
-    - Implement `discoverVibeKanbanPort(ctx, c, containerID)` that:
-      - Executes `ss -tlnp` inside the container via `dockerpkg.ExecInContainerWithOutput`
-      - Greps for `vibe-kanban` and parses the port number
-      - Retries for up to 30 seconds with 2-second intervals
-      - Returns `(port int, err error)`
-    - In `runStart()`, after SSH health check passes, check if `vibe-kanban` is in enabled agents
-    - If enabled, call `discoverVibeKanbanPort()` and set `vibeKanbanURL`
-    - On failure, print warning to stderr and continue (graceful degradation)
-    - Pass `VibeKanbanURL` to `printSessionSummary` / `SessionSummary`
-    - Update `printSessionSummary` to accept and pass through the URL
-    - _Requirements: VK-8.2, VK-8.3, VK-8.4_
+  - [x] 6.2 Remove all Vibe Kanban–specific code from root.go
+    - Delete `discoverVibeKanbanPort()` function
+    - Delete `portRegexp` package-level variable
+    - Remove `constants.VibeKanbanAgentName` reference and the two VK discovery blocks (reconnect path + fresh start path)
+    - Remove unused imports (`"regexp"`, `"strconv"`) from `root.go`
+    - _Requirements: SI-4.2, SI-4.3_
 
-- [ ] 7. Checkpoint - Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
+- [x] 7. Checkpoint - Verify compilation and existing tests
+  - Ensure all tests pass (`go test ./...`), ask the user if questions arise.
 
-- [ ] 8. Write unit tests for the Vibe Kanban agent module
-  - [ ] 8.1 Create `internal/agents/vibekanban/vibekanban_test.go` with unit tests
-    - `TestID` — returns `constants.VibeKanbanAgentName`
-    - `TestInstallNodeAlreadyInstalled` — skips Node.js when `IsNodeInstalled()` is true
-    - `TestInstallNodeNotInstalled` — installs Node.js when `IsNodeInstalled()` is false
-    - `TestInstallContainsNpmPackage` — output contains `npm install -g` with `vibe-kanban`
-    - `TestInstallContainsEntrypoint` — output contains ENTRYPOINT instruction
-    - `TestInstallContainsSupervisor` — output contains supervisor script with crash recovery params
-    - `TestInstallDoesNotContainCMD` — output does NOT contain CMD instruction
-    - `TestInstallNoRustNoPnpm` — output does NOT contain rust/pnpm references
-    - `TestCredentialStorePath` — returns empty string
-    - `TestContainerMountPath` — returns empty string for various homeDir values
-    - `TestHasCredentials` — returns `(true, nil)`
-    - `TestHealthCheckBinaryFailure` — error message identifies binary check
-    - `TestHealthCheckProcessFailure` — error message identifies process check
-    - _Requirements: VK-1.1, VK-2.1, VK-2.2, VK-2.4, VK-3.1, VK-4.1, VK-4.2, VK-4.3, VK-5.1, VK-5.2_
+- [x] 8. Update existing tests
+  - [x] 8.1 Update `root_test.go` to use `AgentInfo` instead of `VibeKanbanURL`
+    - Update `TestFormatSessionSummaryWithVibeKanban` to use `AgentInfo: []agent.KeyValue{{Key: "Vibe Kanban", Value: "http://localhost:3000"}}`
+    - Update `TestFormatSessionSummaryWithoutVibeKanban` to use `AgentInfo: nil`
+    - Update `TestPropertySessionSummaryIncludesVibeKanbanURL` to use `AgentInfo` field and assert generic formatting behaviour
+    - Import `agent` package in `root_test.go`
+    - _Requirements: SI-7.2, SI-7.3, SI-7.4_
 
-  - [ ]* 8.2 Write unit tests for `FormatSessionSummary` with Vibe Kanban URL in `internal/cmd/root_test.go`
-    - `TestFormatSessionSummaryWithVibeKanban` — URL line present when VibeKanbanURL is set
-    - `TestFormatSessionSummaryWithoutVibeKanban` — URL line absent when VibeKanbanURL is empty
-    - _Requirements: VK-8.3, VK-8.4_
+  - [x] 8.2 Add unit tests for no-op `SummaryInfo` in agent test files
+    - Add `TestSummaryInfoReturnsNil` to `internal/agents/claude/claude_test.go`
+    - Add `TestSummaryInfoReturnsNil` to `internal/agents/augment/augment_test.go`
+    - Add `TestSummaryInfoReturnsNil` to `internal/agents/buildresources/buildresources_test.go`
+    - _Requirements: SI-6.1, SI-6.2, SI-6.3_
 
-- [ ] 9. Write property-based tests for the Vibe Kanban agent module
-  - [ ]* 9.1 Write property test: Node.js conditional installation invariant
-    - **Property 1: Node.js conditional installation invariant**
-    - For any DockerfileBuilder state, calling Install() results in at most one Node.js installation block and `IsNodeInstalled()` returns true after
-    - Use `rapid.Bool()` to draw whether Node.js is pre-installed
-    - **Validates: Requirements VK-2.1**
+- [x] 9. Write property tests for collection logic and formatting
+  - [x] 9.1 Write property test: Collection preserves order and excludes errors
+    - **Property 1: Collection preserves order and excludes errors**
+    - **Validates: Requirements SI-2.2, SI-3.2, SI-3.3**
+    - Create a helper function `CollectAgentInfo` (exported for testability) that takes a slice of `([]KeyValue, error)` results and returns the collected `[]KeyValue`
+    - Write `TestPropertyCollectionPreservesOrderAndExcludesErrors` in `internal/cmd/root_test.go` using `rapid`
+    - Generate random slices of `([]KeyValue, error)` tuples; assert collected output matches expected filtered/ordered result
 
-  - [ ]* 9.2 Write property test: Install does not emit CMD
-    - **Property 2: Install does not emit CMD**
-    - For any DockerfileBuilder state, calling Install() does NOT append any line starting with `CMD`
-    - Use `rapid.Bool()` to draw whether Node.js is pre-installed
-    - **Validates: Requirements VK-3.1**
+  - [x] 9.2 Write property test: Session summary formatting includes all agent info after standard fields
+    - **Property 2: Session summary formatting includes all agent info after standard fields**
+    - **Validates: Requirements SI-2.3, SI-2.4, SI-7.2, SI-7.3, SI-7.4**
+    - Write `TestPropertyFormatSessionSummaryAgentInfo` in `internal/cmd/root_test.go` using `rapid`
+    - Generate random `SessionSummary` with random `AgentInfo`; assert all keys/values present, after "Enabled agents" line, no extras when empty
 
-  - [ ]* 9.3 Write property test: No-credential-store invariant
-    - **Property 3: No-credential-store invariant**
-    - For any string homeDir, `ContainerMountPath(homeDir)` returns empty; for any storePath, `HasCredentials(storePath)` returns `(true, nil)`
-    - Use `rapid.String()` to draw arbitrary homeDir and storePath values
-    - **Validates: Requirements VK-4.2, VK-4.3**
+  - [x] 9.3 Write property test: Vibe Kanban URL format
+    - **Property 3: Vibe Kanban URL format**
+    - **Validates: Requirements SI-5.2**
+    - Write `TestPropertyVibeKanbanURLFormat` in `internal/agents/vibekanban/vibekanban_test.go` using `rapid`
+    - Generate random port in 1–65535; assert URL matches `"http://localhost:<port>"` exactly
 
-  - [ ]* 9.4 Write property test: Session summary includes Vibe Kanban URL for any valid port
-    - **Property 4: Session summary includes Vibe Kanban URL for any valid port**
-    - For any valid TCP port (1-65535), `FormatSessionSummary()` with `VibeKanbanURL` set includes the URL; when empty, output does NOT contain "Vibe Kanban:"
-    - Use `rapid.IntRange(1, 65535)` to draw port numbers
-    - **Validates: Requirements VK-8.3**
-
-  - [ ]* 9.5 Write property test: Supervisor script contains correct backoff parameters
-    - **Property 5: Supervisor script contains correct backoff parameters**
-    - For any valid Linux username, the supervisor script generated by Install() contains `MAX_RESTARTS=5`, `WINDOW_SECONDS=60`, and `DELAY_SECONDS=5`
-    - Use `rapid.StringMatching(`[a-z_][a-z0-9_-]*`)` to draw usernames
-    - **Validates: Requirements VK-3.5**
-
-- [ ] 10. Write integration tests for the Vibe Kanban agent module
-  - [ ]* 10.1 Create `internal/agents/vibekanban/integration_test.go` with integration tests
-    - Gated by `//go:build integration`
-    - Include `TestMain` with consent gate and base image removal
-    - `TestVibeKanbanInstallsAndRuns` — full image build, binary present (`which vibe-kanban` exits 0), process running
-    - `TestVibeKanbanHealthCheck` — HealthCheck passes on a live container
-    - `TestVibeKanbanPortDiscovery` — port is discoverable via ss after startup
-    - `TestVibeKanbanCrashRecovery` — process restarts after being killed (kill + wait + verify running)
-    - `TestVibeKanbanAccessibleFromHost` — HTTP GET to localhost:port returns 2xx (host network mode)
-    - _Requirements: VK-2.3, VK-3.1, VK-3.3, VK-3.5, VK-5.1, VK-5.2, VK-8.1, VK-8.2_
-
-- [ ] 11. Final checkpoint - Ensure all tests pass
-  - Ensure all tests pass, ask the user if questions arise.
+- [x] 10. Final checkpoint - Ensure all tests pass
+  - Ensure all tests pass (`go test ./...`), ask the user if questions arise.
 
 ## Notes
 
@@ -153,22 +106,19 @@ Implement the Vibe Kanban agent module (`internal/agents/vibekanban/`) — a web
 - Checkpoints ensure incremental validation
 - Property tests validate universal correctness properties from the design document
 - Unit tests validate specific examples and edge cases
-- The design uses Go — all code examples and implementations use Go
-- The agent module follows the same pattern as `internal/agents/buildresources/` and `internal/agents/augment/`
-- `ExecInContainerWithOutput` is needed for port discovery (capturing stdout from `ss -tlnp`)
-- The `Entrypoint()` builder method is generic and reusable by future agents needing initialization before CMD
+- The Go compiler enforces interface compliance — once `SummaryInfo` is added to the interface, all implementations must exist for the project to compile (tasks 1–3 must be done together or in quick succession)
 
 ## Task Dependency Graph
 
 ```json
 {
   "waves": [
-    { "id": 0, "tasks": ["1.1", "2.1", "3.1"] },
-    { "id": 1, "tasks": ["2.2", "5.1"] },
-    { "id": 2, "tasks": ["5.2", "6.1"] },
-    { "id": 3, "tasks": ["6.2"] },
-    { "id": 4, "tasks": ["8.1", "8.2", "9.1", "9.2", "9.3", "9.4", "9.5"] },
-    { "id": 5, "tasks": ["10.1"] }
+    { "id": 0, "tasks": ["1.1"] },
+    { "id": 1, "tasks": ["2.1", "2.2", "2.3", "3.1"] },
+    { "id": 2, "tasks": ["5.1"] },
+    { "id": 3, "tasks": ["6.1", "6.2"] },
+    { "id": 4, "tasks": ["8.1", "8.2"] },
+    { "id": 5, "tasks": ["9.1", "9.2", "9.3"] }
   ]
 }
 ```

@@ -93,6 +93,12 @@ func (a *buildResourcesAgent) HasCredentials(storePath string) (bool, error) {
 	return true, nil
 }
 
+// SummaryInfo returns no additional session summary information for this agent.
+// Satisfies: SI-6.3
+func (a *buildResourcesAgent) SummaryInfo(ctx context.Context, c *docker.Client, containerID string) ([]agent.KeyValue, error) {
+	return nil, nil
+}
+
 // HealthCheck verifies all build tools are installed and executable.
 // Satisfies: BR-4
 func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {

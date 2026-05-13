@@ -231,6 +231,15 @@ func (b *DockerfileBuilder) Cmd(cmd string) {
 	b.lines = append(b.lines, fmt.Sprintf(`CMD ["/bin/sh", "-c", %q]`, cmd))
 }
 
+// Entrypoint appends an ENTRYPOINT instruction in exec form.
+func (b *DockerfileBuilder) Entrypoint(args ...string) {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = fmt.Sprintf("%q", a)
+	}
+	b.lines = append(b.lines, fmt.Sprintf("ENTRYPOINT [%s]", strings.Join(quoted, ", ")))
+}
+
 // RunAsUser emits a USER switch, runs the command as the container user,
 // then switches back to root for subsequent instructions. This is used by
 // agent modules that need to install user-local tools (e.g. uv).

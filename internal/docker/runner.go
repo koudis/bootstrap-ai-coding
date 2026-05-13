@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
@@ -375,4 +376,36 @@ func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []s
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// ExecInContainerWithOutput runs a command inside a running container and returns
+// the exit code and captured stdout. Stderr is discarded. This is useful when the
+// caller needs to parse command output (e.g. port discovery via `ss -tlnp`).
+func ExecInContainerWithOutput(ctx context.Context, c *Client, containerID string, cmd []string) (exitCode int, stdout string, err error) {
+	execID, err := c.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return -1, "", fmt.Errorf("creating exec in container %s: %w", containerID, err)
+	}
+
+	resp, err := c.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return -1, "", fmt.Errorf("attaching to exec in container %s: %w", containerID, err)
+	}
+	defer resp.Close()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader); err != nil {
+		return -1, "", fmt.Errorf("reading exec output in container %s: %w", containerID, err)
+	}
+
+	inspect, err := c.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return -1, "", fmt.Errorf("inspecting exec in container %s: %w", containerID, err)
+	}
+
+	return inspect.ExitCode, stdoutBuf.String(), nil
 }

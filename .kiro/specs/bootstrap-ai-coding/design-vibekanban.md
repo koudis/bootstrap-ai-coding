@@ -69,14 +69,19 @@ The supervisor script (`/usr/local/bin/vibe-kanban-supervisor.sh`) implements cr
 
 ### Port Discovery
 
-After the container starts and the health check passes, the CLI discovers the Vibe Kanban port by:
+Vibe Kanban auto-assigns its port at startup (VK-9.1). The supervisor script discovers the port and writes it to a well-known file:
 
-1. Executing `ss -tlnp` inside the container to list listening TCP sockets
-2. Grepping for the `vibe-kanban` process
-3. Parsing the port number from the output
-4. Retrying up to 30 seconds (the server may take time to bind)
+1. The supervisor starts vibe-kanban in the background and captures its PID
+2. It polls `ss -tlnp` filtered by the exact PID (`grep "pid=$VK_PID,"`) to find the bound port
+3. Once found, it writes the port number to `/tmp/vibe-kanban.port`
+4. `SummaryInfo()` reads this file (retrying up to 30 seconds)
 
-This is done via `docker.ExecInContainer()` with a shell pipeline.
+This approach is robust because:
+- It uses PID-based filtering (unambiguous, no process name dependency)
+- It works regardless of how many other services bind ports in the container
+- It avoids conflicts when multiple containers share the host network namespace (each gets a unique auto-assigned port)
+
+See [design-agent-summary-info.md](design-agent-summary-info.md) for the `SummaryInfo()` implementation details.
 
 ### DockerfileBuilder Extension
 
@@ -568,9 +573,9 @@ import (
 
 **Why:** The entrypoint runs as root (Docker default). The supervisor uses `su -c "vibe-kanban" "$USERNAME"` to drop privileges. This is simpler than sudo (no sudoers parsing) and works reliably in the container environment.
 
-### 4. Port discovery via `ss -tlnp` (not reading a config file)
+### 4. Port discovery via port file (not `ss` process name matching)
 
-**Why:** Vibe Kanban auto-assigns its port at startup. There's no config file to read. The `ss` command (part of iproute2, installed in Ubuntu by default) shows which port the process is actually listening on. This is the most reliable method since it reflects runtime state.
+**Why:** Vibe Kanban auto-assigns its port at startup. The supervisor discovers the port using PID-based `ss` filtering and writes it to `/tmp/vibe-kanban.port`. The `SummaryInfo()` method reads this file. This is more reliable than parsing `ss` output in `SummaryInfo()` because: (a) the Rust binary name in `ss` output varies by platform/version, (b) other services may bind ports in the container, and (c) PID-based filtering in the supervisor is unambiguous since it knows the exact child PID.
 
 ### 5. 30-second timeout for port discovery
 
@@ -580,9 +585,9 @@ import (
 
 **Why (VK-8.4):** If port discovery times out, the session summary simply omits the Vibe Kanban URL line. The user can still SSH into the container and discover the port manually. This prevents a flaky network or slow startup from blocking the entire workflow.
 
-### 7. `--host 0.0.0.0` flag for vibe-kanban
+### 7. `HOST=0.0.0.0` environment variable for vibe-kanban
 
-**Why:** By default, Node.js servers may bind to `127.0.0.1` inside the container. With host network mode, this is fine (the host IS the container's network namespace). But to be safe and explicit, we pass `--host 0.0.0.0` so the server accepts connections on all interfaces.
+**Why:** The vibe-kanban Rust binary reads the `HOST` environment variable to determine its listen address (defaults to `127.0.0.1`). Setting `HOST=0.0.0.0` ensures the server accepts connections on all interfaces, which is required for host network mode accessibility. The `BROWSER=none` variable is also set to suppress the automatic browser-open attempt in the headless container environment.
 
 ### 8. Core changes are minimal and generic
 

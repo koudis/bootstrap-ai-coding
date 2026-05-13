@@ -31,6 +31,7 @@ The design is split across multiple focused files:
 | [`design-agents.md`](design-agents.md) | Agent modules: contract, Claude Code implementation, adding future agents |
 | [`design-vibekanban.md`](design-vibekanban.md) | Vibe Kanban agent module: auto-start mechanism, crash recovery, port discovery |
 | [`design-properties.md`](design-properties.md) | Correctness properties (Properties 1–51) and full testing strategy |
+| [`design-agent-summary-info.md`](design-agent-summary-info.md) | Agent Summary Info: KeyValue type, SummaryInfo interface method, generic collection, Vibe Kanban port discovery migration |
 
 ## Related Documents
 
@@ -38,3 +39,4 @@ The design is split across multiple focused files:
 - `requirements-agents.md` — agent module requirements (CC-1–CC-8 for Claude Code, AC-1–AC-6 for Augment Code, BR-1–BR-6 for Build Resources, VK-1–VK-8 for Vibe Kanban)
 - `requirements-cli-combinations.md` — valid and invalid CLI flag combinations (CLI-1–CLI-6)
 - `requirements-two-layer-image.md` — two-layer Docker image requirements (TL-1–TL-11)
+- `requirements-agent-summary-info.md` — Agent Summary Info requirements (SI-1–SI-7)

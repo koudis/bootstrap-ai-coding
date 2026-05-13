@@ -430,7 +430,37 @@ The container uses host network mode (Req 26) by default, so Vibe Kanban's auto-
 #### Acceptance Criteria
 
 1. WHEN the container is running in host network mode (Req 26, default), THE Vibe Kanban server SHALL be accessible from the host browser at `http://localhost:<Vibe_Kanban_Port>`, where the server responds with an HTTP 2xx status to a GET request on that URL.
-2. WHEN the container is successfully started and the Vibe Kanban health check (VK-5) passes, THE CLI SHALL discover the Vibe_Kanban_Port by inspecting the running Vibe Kanban process's listening port inside the Container, waiting up to 30 seconds for the port to become available.
-3. THE session summary (Requirement 17 in requirements-core.md) SHALL include a labelled line "Vibe Kanban:" followed by the full URL `http://localhost:<Vibe_Kanban_Port>` so the user knows how to access it.
-4. IF the CLI cannot discover the Vibe_Kanban_Port within the 30-second timeout (e.g. the process started but has not bound a port), THEN THE CLI SHALL print a warning message to stdout indicating that the Vibe Kanban URL could not be determined, and SHALL omit the Vibe Kanban URL from the session summary without failing the overall startup.
+2. WHEN the container is successfully started and the Vibe Kanban health check (VK-5) passes, THE Vibe Kanban module SHALL discover the Vibe_Kanban_Port via its `SummaryInfo()` method (see SI-5 in requirements-agent-summary-info.md) by inspecting the running Vibe Kanban process's listening port inside the Container, waiting up to 30 seconds for the port to become available.
+3. THE session summary (Requirement 17 in requirements-core.md) SHALL include a labelled line "Vibe Kanban:" followed by the full URL `http://localhost:<Vibe_Kanban_Port>` so the user knows how to access it. This is delivered via the generic Agent Summary Info mechanism (SI-2, SI-7).
+4. IF the Vibe Kanban module cannot discover the Vibe_Kanban_Port within the 30-second timeout (e.g. the process started but has not bound a port), THEN THE core SHALL print a warning message to stderr (per SI-3) and SHALL omit the Vibe Kanban URL from the session summary without failing the overall startup.
 5. WHEN `--host-network-off` is set (bridge mode), THE Vibe Kanban server SHALL NOT be accessible from the host without additional port forwarding — this is a known limitation of bridge mode for non-SSH services.
+
+
+---
+
+### Requirement VK-9: Port Assignment and Discovery
+
+**User Story:** As a developer running multiple bac containers simultaneously in host network mode, I need each container's Vibe Kanban instance to use a unique port so they don't conflict with each other.
+
+#### Acceptance Criteria
+
+1. THE Vibe Kanban server SHALL use auto-assigned port selection (port 0 / OS-assigned) at startup, allowing the operating system to choose a free port. THE supervisor script SHALL NOT hardcode or fix the port number.
+2. BECAUSE containers in host network mode (Req 26, default) share the host's network namespace, a fixed port would cause bind failures when multiple bac containers run simultaneously. Auto-assignment ensures each instance gets a unique port.
+3. THE `SummaryInfo()` method SHALL discover the auto-assigned port by reading a well-known port file (`/tmp/vibe-kanban.port`) written by the supervisor script. The supervisor discovers the port by polling `ss -tlnp` filtered by the vibe-kanban process PID, then writes the port number to the file. This approach is deterministic regardless of how many services listen in the container.
+4. THE port discovery logic SHALL NOT rely on the process name appearing in `ss -tlnp` output, because the Rust binary downloaded by the npm wrapper may report under a different name depending on the platform and version. The supervisor uses PID-based filtering (`grep "pid=$VK_PID,"`) which is unambiguous.
+5. THE container image SHALL include `iproute2` (provides `ss`) and `procps` (provides `pgrep`, `ps`) as runtime dependencies installed by the Vibe Kanban module's `Install()` method, to support port discovery and health checks.
+6. THE supervisor script SHALL set `BROWSER=none` in the environment when launching vibe-kanban, to suppress the automatic browser-open attempt in the headless container environment.
+7. THE Vibe Kanban module's `Install()` method SHALL pre-download the platform-specific binary during image build by running `vibe-kanban` with a timeout, so that the binary is cached in the container and does not require internet access at runtime.
+
+#### Design Notes
+
+- The vibe-kanban npm package (`npx vibe-kanban`) is a CLI wrapper that downloads a platform-specific Rust binary on first run and caches it in `~/.vibe-kanban/bin/`. The pre-download step during image build ensures the binary is available without network access at container start.
+- The `HOST=0.0.0.0` environment variable is set so the server binds to all interfaces, making it accessible from the host in host network mode.
+- In bridge mode (`--host-network-off`), port conflicts are not an issue since each container has its own network namespace, but the port is still auto-assigned for consistency.
+
+
+---
+
+## Agent Summary Info
+
+See **[requirements-agent-summary-info.md](./requirements-agent-summary-info.md)** — Agent Summary Info mechanism: generic key:value pairs in session summary via Agent interface extension. Requirements SI-1–SI-7.

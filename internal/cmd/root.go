@@ -110,18 +110,21 @@ type SessionSummary struct {
 	SSHPort       int
 	SSHConnect    string
 	EnabledAgents []string
+	AgentInfo     []agent.KeyValue
 }
 
-// FormatSessionSummary formats a SessionSummary into the five-line output.
+// FormatSessionSummary formats a SessionSummary into the output lines.
 func FormatSessionSummary(s SessionSummary) string {
-	return fmt.Sprintf(
-		"Data directory:  %s\nProject directory: %s\nSSH port:        %d\nSSH connect:     %s\nEnabled agents:  %s\n",
-		s.DataDir,
-		s.ProjectDir,
-		s.SSHPort,
-		s.SSHConnect,
-		strings.Join(s.EnabledAgents, ", "),
-	)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Data directory:  %s\n", s.DataDir)
+	fmt.Fprintf(&sb, "Project directory: %s\n", s.ProjectDir)
+	fmt.Fprintf(&sb, "SSH port:        %d\n", s.SSHPort)
+	fmt.Fprintf(&sb, "SSH connect:     %s\n", s.SSHConnect)
+	fmt.Fprintf(&sb, "Enabled agents:  %s\n", strings.Join(s.EnabledAgents, ", "))
+	for _, kv := range s.AgentInfo {
+		fmt.Fprintf(&sb, "%-17s%s\n", kv.Key+":", kv.Value)
+	}
+	return sb.String()
 }
 
 // ParseAgentsFlag splits a comma-separated agent ID string, trims whitespace,
@@ -681,7 +684,19 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			if err := sshpkg.SyncSSHConfig(containerName, sshPort, info.Username, flagNoUpdateSSHConfig); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: syncing SSH config: %v\n", err)
 			}
-			printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
+
+			// Collect agent summary info.
+			var agentInfo []agent.KeyValue
+			for _, a := range enabledAgents {
+				kvs, err := a.SummaryInfo(ctx, c, containerName)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: %s summary info: %v\n", a.ID(), err)
+					continue
+				}
+				agentInfo = append(agentInfo, kvs...)
+			}
+
+			printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs, agentInfo)
 			return nil
 		}
 		// --rebuild: stop the running container so it gets recreated from the new image.
@@ -747,19 +762,55 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		}
 	}
 
-	printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
+	// Collect agent summary info.
+	var agentInfo []agent.KeyValue
+	for _, a := range enabledAgents {
+		kvs, err := a.SummaryInfo(ctx, c, containerName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s summary info: %v\n", a.ID(), err)
+			continue
+		}
+		agentInfo = append(agentInfo, kvs...)
+	}
+
+	printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs, agentInfo)
 	return nil
 }
 
-func printSessionSummary(dd *datadir.DataDir, projectDir string, containerName string, sshPort int, agentIDs []string) {
+
+
+func printSessionSummary(dd *datadir.DataDir, projectDir string, containerName string, sshPort int, agentIDs []string, agentInfo []agent.KeyValue) {
 	summary := SessionSummary{
 		DataDir:       dd.Path(),
 		ProjectDir:    projectDir,
 		SSHPort:       sshPort,
 		SSHConnect:    "ssh " + containerName,
 		EnabledAgents: agentIDs,
+		AgentInfo:     agentInfo,
 	}
 	fmt.Print(FormatSessionSummary(summary))
+}
+
+// AgentInfoResult represents the result of calling SummaryInfo on a single agent.
+type AgentInfoResult struct {
+	KeyValues []agent.KeyValue
+	Err       error
+}
+
+// CollectAgentInfo takes a slice of AgentInfoResult (one per agent, in declared
+// order) and returns the collected KeyValue pairs. Results with a non-nil Err
+// are excluded; all others are appended in order.
+//
+// Validates: SI-2.2, SI-3.2, SI-3.3
+func CollectAgentInfo(results []AgentInfoResult) []agent.KeyValue {
+	var collected []agent.KeyValue
+	for _, r := range results {
+		if r.Err != nil {
+			continue
+		}
+		collected = append(collected, r.KeyValues...)
+	}
+	return collected
 }
 
 // StringSlicesEqual reports whether a and b contain the same elements in the same order.

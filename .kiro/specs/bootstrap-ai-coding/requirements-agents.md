@@ -410,14 +410,14 @@ The container uses host network mode (Req 26) by default, so Vibe Kanban's auto-
 
 ---
 
-### Requirement VK-7: Default Inclusion
+### Requirement VK-7: Optional Inclusion
 
-**User Story:** As a developer, I want Vibe Kanban included by default so that the project management board is available without needing to explicitly request it.
+**User Story:** As a developer, I want Vibe Kanban available as an opt-in agent so that I can enable the project management board when I need it.
 
 #### Acceptance Criteria
 
-1. THE `constants.DefaultAgents` value SHALL include `"vibe-kanban"` in the comma-separated list so that the agent is present in the parsed agent set when the `--agents` flag is omitted.
-2. WHEN the user invokes the CLI without the `--agents` flag, THE system SHALL include `"vibe-kanban"` in the enabled agents list displayed in the session summary.
+1. THE `constants.DefaultAgents` value SHALL NOT include `"vibe-kanban"` — the agent is opt-in only.
+2. WHEN the user invokes the CLI with `--agents` including `"vibe-kanban"` (e.g. `--agents claude-code,augment-code,build-resources,vibe-kanban`), THE system SHALL include `"vibe-kanban"` in the enabled agents list and install it in the container.
 3. IF the user specifies `--agents` with a list that does not contain `"vibe-kanban"`, THEN THE system SHALL not install or enable the Vibe Kanban module in the container, and `"vibe-kanban"` SHALL not appear in the session summary's enabled agents list.
 4. THE `"vibe-kanban"` agent ID SHALL be registered in the agent registry so that `agent.Lookup("vibe-kanban")` resolves without error.
 

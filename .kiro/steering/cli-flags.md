@@ -27,7 +27,7 @@ The path to the project directory on the host. Mounted into the container at `co
 
 Comma-separated list of agent IDs to install in the container.
 
-- Default: `constants.DefaultAgents` (`"claude-code,augment-code,build-resources,vibe-kanban"`)
+- Default: `constants.DefaultAgents` (`"claude-code,augment-code,build-resources"`)
 - Example: `--agents claude-code`
 - Example: `--agents augment-code`
 - Example: `--agents claude-code,augment-code`

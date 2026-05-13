@@ -142,7 +142,7 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 2. THE Agent_Registry SHALL allow Agent modules to register themselves without requiring changes to core system code. Adding a new Agent SHALL require only a new module that implements the Agent_Interface and registers itself.
 3. IF an Agent identifier supplied by the user is not found in the Agent_Registry, THEN THE CLI SHALL print a descriptive error message to stderr listing the unknown identifier and exit with a non-zero exit code.
 4. THE CLI SHALL accept an `--agents` flag whose value is a comma-separated list of Agent identifiers specifying the Enabled_Agents for the Container.
-5. WHEN the `--agents` flag is omitted, THE CLI SHALL enable `claude-code`, `augment-code`, `build-resources`, and `vibe-kanban` as the default Enabled_Agents (i.e. the default value of `--agents` is `"claude-code,augment-code,build-resources,vibe-kanban"`).
+5. WHEN the `--agents` flag is omitted, THE CLI SHALL enable `claude-code`, `augment-code`, and `build-resources` as the default Enabled_Agents (i.e. the default value of `--agents` is `"claude-code,augment-code,build-resources"`).
 
 ---
 

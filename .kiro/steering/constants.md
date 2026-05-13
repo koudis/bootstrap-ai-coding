@@ -18,8 +18,8 @@ This means:
 | Constant | Value | Glossary Term |
 |---|---|---|
 | `BaseContainerImage` | `"ubuntu:26.04"` | `Base_Container_Image` |
-| `ContainerUser` | `"dev"` | `Container_User` (username) |
-| `ContainerUserHome` | `"/home/" + ContainerUser` | `Container_User_Home` |
+| `ContainerUser` | _(removed — dynamic per Req 22)_ | `Container_User` (username matches Host_User) |
+| `ContainerUserHome` | _(removed — dynamic per Req 22)_ | `Container_User_Home` (matches Host_User home) |
 | `WorkspaceMountPath` | `"/workspace"` | `Mounted_Volume` (container path) |
 | `SSHPortStart` | `2222` | `SSH_Port` (starting value) |
 | `ContainerSSHPort` | `22` | SSH port inside the container |
@@ -30,7 +30,9 @@ This means:
 | `ManifestFilePath` | `"/bac-manifest.json"` | manifest file inside image |
 | `ClaudeCodeAgentName` | `"claude-code"` | Agent_ID for Claude Code (CC-1) |
 | `AugmentCodeAgentName` | `"augment-code"` | Agent_ID for Augment Code (AC-1) |
-| `DefaultAgents` | `"claude-code,augment-code"` | default `Enabled_Agents` (Req 7.5) |
+| `BuildResourcesAgentName` | `"build-resources"` | Agent_ID for Build Resources (BR-1) |
+| `VibeKanbanAgentName` | `"vibe-kanban"` | Agent_ID for Vibe Kanban (VK-1) |
+| `DefaultAgents` | `"claude-code,augment-code,build-resources,vibe-kanban"` | default `Enabled_Agents` (Req 7.5) |
 | `SSHHostKeyType` | `"ed25519"` | SSH host key algorithm |
 | `MinDockerVersion` | `"20.10"` | minimum Docker version (Req 6.3) |
 | `ToolDataDirPerm` | `0o700` | Tool_Data_Dir permissions (Req 15.2) |
@@ -39,6 +41,11 @@ This means:
 | `SSHConfigFile` | `"~/.ssh/config"` | SSH_Config_File (Req 19) |
 | `SSHDirPerm` | `0o700` | ~/.ssh directory permissions (Req 18.5) |
 | `HostBindIP` | `"127.0.0.1"` | IP address containers bind SSH port to on the host (Req R7) |
+| `DefaultRestartPolicy` | `"unless-stopped"` | Docker restart policy default (Req 25.2) |
+| `BaseImageName` | `"bac-base"` | Base image name for two-layer architecture (TL-11) |
+| `BaseImageTag` | `"bac-base:latest"` | Full base image reference (TL-11) |
+| `GitConfigPerm` | `0o444` | Injected .gitconfig permissions (Req 24) |
+| `KeyringProfileScript` | `"/etc/profile.d/dbus-keyring.sh"` | Keyring startup script path (CC-7) |
 | `ImageBuildTimeout` | `8 * time.Minute` | Image_Build_Timeout (Req 14.7) |
 
 ### Variables (not const — Go does not support slice/map constants)

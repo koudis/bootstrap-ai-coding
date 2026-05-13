@@ -21,7 +21,7 @@ Data directory:  ~/.config/bootstrap-ai-coding/<container-name>/
 Project directory: /path/to/project
 SSH port:        2222
 SSH connect:     ssh bac-<container-name>
-Enabled agents:  claude-code, augment-code
+Enabled agents:  claude-code, augment-code, build-resources, vibe-kanban
 ```
 
 ## Key design goals
@@ -44,7 +44,7 @@ Developers who want to run AI coding agents (Claude Code, Augment Code, etc.) in
 | Flag | Description |
 |---|---|
 | `<project-path>` | (positional) Path to the project directory to mount |
-| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code`) |
+| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code,build-resources,vibe-kanban`) |
 | `--port <n>` | Override the SSH port (default: auto-selected from 2222 upward) |
 | `--ssh-key <path>` | Override the SSH public key path |
 | `--rebuild` | Force a full container image rebuild |

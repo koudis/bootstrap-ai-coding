@@ -99,7 +99,7 @@ sequenceDiagram
     note over CLI: *hostinfo.Info (Username, HomeDir, UID, GID) now available for all subsequent operations
     CLI->>CLI: Validate project path exists
     CLI->>Docker: Ping daemon, check version >= 20.10
-    CLI->>AgentRegistry: Resolve enabled agents from --agents flag (default: "claude-code,augment-code,build-resources")
+    CLI->>AgentRegistry: Resolve enabled agents from --agents flag (default: "claude-code,augment-code,build-resources,vibe-kanban")
     note over AgentRegistry: Unknown agent ID → error, exit 1
     CLI->>SSH: Discover public key (~/.ssh/id_ed25519.pub → id_rsa.pub → --ssh-key)
     CLI->>DataDir: Init Tool_Data_Dir (~/.config/bootstrap-ai-coding/<name>/)

@@ -747,6 +747,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return fmt.Errorf("container started but SSH did not become ready: %w", err)
 	}
 
+	// Run health checks for all enabled agents (CC-5, AC-5, BR-4, VK-5).
+	for _, a := range enabledAgents {
+		if err := a.HealthCheck(ctx, c, containerName); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s health check: %v\n", a.ID(), err)
+		}
+	}
+
 	// Sync known_hosts with the container's SSH host key (Req 18.1–18.9).
 	if err := sshpkg.SyncKnownHosts(sshPort, hostKeyPub, flagNoUpdateKnownHosts); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: syncing known_hosts: %v\n", err)
@@ -758,7 +765,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 
 	for _, s := range agentStatuses {
 		if !s.hasCredentials {
-			fmt.Printf("Authenticate %s inside the container: run 'claude' and complete the login flow.\n", s.a.ID())
+			fmt.Printf("Authenticate %s inside the container.\n", s.a.ID())
 		}
 	}
 

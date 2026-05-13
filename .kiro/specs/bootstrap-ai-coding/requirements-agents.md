@@ -285,7 +285,7 @@ Build Resources is a pseudo-agent that does not provide an AI coding tool. Inste
    - `uv --version`
    - `cmake --version`
    - `javac -version`
-   - `go version` (executed via `bash -lc` to pick up `/etc/profile.d/golang.sh`)
+   - `/usr/local/go/bin/go version`
 2. THE Health_Check SHALL be invoked by the core after the Container starts.
 3. IF any Health_Check command fails, THE core SHALL report the failure to the user with a descriptive error message identifying the Build Resources agent and the specific tool that failed.
 
@@ -311,3 +311,4 @@ Build Resources is a pseudo-agent that does not provide an AI coding tool. Inste
 
 1. THE `constants.DefaultAgents` value SHALL include `"build-resources"` so that the module is enabled by default when the `--agents` flag is omitted.
 2. THE user SHALL be able to exclude Build Resources by specifying `--agents` without `build-resources` in the list.
+

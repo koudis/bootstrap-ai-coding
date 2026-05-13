@@ -33,7 +33,7 @@ The design is split across multiple focused files:
 
 ## Related Documents
 
-- `requirements-core.md` — core application requirements (Req 1–22, including Req 22: Dynamic Container User Identity)
-- `requirements-agents.md` — agent module requirements (CC-1–CC-6 for Claude Code, AC-1–AC-6 for Augment Code)
-- `requirements-cli-combinations.md` — valid and invalid CLI flag combinations (CLI-1–CLI-6)
+- `requirements-core.md` — core application requirements (Req 1–26, including Req 22: Dynamic Container User Identity, Req 25: Restart Policy, Req 26: Host Network Mode)
+- `requirements-agents.md` — agent module requirements (CC-1–CC-8 for Claude Code, AC-1–AC-6 for Augment Code, BR-1–BR-6 for Build Resources)
+- `requirements-cli-combinations.md` — valid and invalid CLI flag combinations (CLI-1–CLI-7)
 - `requirements-two-layer-image.md` — two-layer Docker image requirements (TL-1–TL-11)

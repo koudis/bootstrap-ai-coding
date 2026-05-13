@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/datadir"
@@ -29,9 +30,12 @@ type StopDockerAPI interface {
 func RunStopWith(api StopDockerAPI, projectPath string) error {
 	ctx := context.Background()
 
-	// List existing bac-managed container names.
+	// List existing bac-managed container names (filtered by bac.managed label).
+	f := filters.NewArgs()
+	f.Add("label", "bac.managed=true")
 	containers, err := api.ContainerList(ctx, container.ListOptions{
-		All: true,
+		All:     true,
+		Filters: f,
 	})
 	if err != nil {
 		return fmt.Errorf("listing existing containers: %w", err)

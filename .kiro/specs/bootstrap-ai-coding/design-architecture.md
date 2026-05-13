@@ -18,7 +18,7 @@ graph TD
     BuildResAgent["internal/agents/buildresources\n(pseudo-agent module)"]
     FutureAgent["internal/agents/other\n(future agent module)"]
     DockerDaemon["Docker Daemon"]
-    Container["Container\n(sshd + dev user + enabled agents)"]
+    Container["Container\n(sshd + container user + enabled agents)"]
 
     User -->|"bac <path> [--agents ...]"| CLI
     CLI --> Naming
@@ -36,7 +36,7 @@ graph TD
 
 The core packages (`internal/cmd`, `internal/naming`, `internal/docker`, `internal/ssh`, `internal/datadir`, `internal/agent`) have **no import dependency** on any package under `internal/agents/`. Agent modules are wired in exclusively via `main.go` blank imports.
 
-> **Note (Req 28 — Module Consolidation):** The former `internal/credentials` and `internal/portfinder` packages have been merged into `internal/datadir`. Both dealt with per-project persistent state (credential paths, port selection/persistence) and had only `cmd/root.go` as their consumer. Consolidating them reduces package count without introducing import cycles or mixing unrelated concerns.
+> **Note (Module Consolidation):** The former `internal/credentials` and `internal/portfinder` packages have been merged into `internal/datadir`. Both dealt with per-project persistent state (credential paths, port selection/persistence) and had only `cmd/root.go` as their consumer. Consolidating them reduces package count without introducing import cycles or mixing unrelated concerns.
 
 ### Package Layout
 
@@ -117,7 +117,7 @@ sequenceDiagram
     else No image or --rebuild
         CLI->>Docker: Inspect Base_Container_Image for UID/GID conflict (Req 10a)
         alt Conflicting_Image_User found (existing user has Host_User UID or GID)
-            CLI->>User: "User '<name>' (UID/GID) already exists in base image. Rename to 'dev'? [y/N]"
+            CLI->>User: "User '<name>' (UID/GID) already exists in base image. Rename to '<host-username>'? [y/N]"
             alt User confirms rename
                 CLI->>CLI: Set user_strategy = rename (use usermod -l in Dockerfile)
             else User declines

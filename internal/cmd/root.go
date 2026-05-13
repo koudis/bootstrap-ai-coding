@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -74,6 +75,7 @@ func ValidateStartOnlyFlags(mode Mode, changedFlags []string) error {
 		"no-update-ssh-config":  true,
 		"verbose":               true,
 		"docker-restart-policy": true,
+		"host-network-off":      true,
 	}
 	for _, name := range changedFlags {
 		if startOnly[name] {
@@ -147,6 +149,7 @@ var (
 	flagNoUpdateSSHConfig   bool
 	flagVerbose             bool
 	flagDockerRestartPolicy string
+	flagHostNetworkOff      bool
 )
 
 var rootCmd = &cobra.Command{
@@ -175,6 +178,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagNoUpdateSSHConfig, "no-update-ssh-config", false, "Skip automatic ~/.ssh/config management")
 	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Stream Docker build output to stdout in real time")
 	rootCmd.Flags().StringVar(&flagDockerRestartPolicy, "docker-restart-policy", constants.DefaultRestartPolicy, "Docker restart policy for the container (no, always, unless-stopped, on-failure)")
+	rootCmd.Flags().BoolVar(&flagHostNetworkOff, "host-network-off", false, "Disable host network mode; use bridge networking with port mapping")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -253,60 +257,12 @@ func run(cmd *cobra.Command, args []string) error {
 	case ModePurge:
 		return runPurge(dockerClient)
 	default:
-		return runStart(dockerClient, args[0], enabledAgents)
+		return runStart(dockerClient, args[0], enabledAgents, flagHostNetworkOff)
 	}
-}
-
-func modeFlag(m Mode) string {
-	if m == ModeStop {
-		return "--stop-and-remove"
-	}
-	return "--purge"
 }
 
 func runStop(c *dockerpkg.Client, projectPath string) error {
-	existingNames, err := dockerpkg.ListBACContainerNames(context.Background(), c)
-	if err != nil {
-		return fmt.Errorf("listing existing containers: %w", err)
-	}
-	containerName, err := naming.ContainerName(projectPath, existingNames)
-	if err != nil {
-		return fmt.Errorf("deriving container name: %w", err)
-	}
-	info, err := dockerpkg.InspectContainer(context.Background(), c, containerName)
-	if err != nil {
-		return err
-	}
-	if info == nil {
-		fmt.Printf("No container found for project %s\n", projectPath)
-		return nil
-	}
-	if err := dockerpkg.StopContainer(context.Background(), c, containerName); err != nil {
-		if !strings.Contains(err.Error(), "not running") {
-			return err
-		}
-	}
-	if err := dockerpkg.RemoveContainer(context.Background(), c, containerName); err != nil {
-		return err
-	}
-	fmt.Printf("Container %s stopped and removed.\n", containerName)
-
-	// Remove known_hosts entries for this project's SSH port (Req 18.7).
-	dd, err := datadir.New(containerName)
-	if err == nil {
-		if port, err := dd.ReadPort(); err == nil && port != 0 {
-			if khErr := sshpkg.RemoveKnownHostsEntries(port); khErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: removing known_hosts entries: %v\n", khErr)
-			}
-		}
-	}
-
-	// Remove SSH config entry for this container (Req 19.7).
-	if cfgErr := sshpkg.RemoveSSHConfigEntry(containerName); cfgErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: removing SSH config entry: %v\n", cfgErr)
-	}
-
-	return nil
+	return RunStopWith(c, projectPath)
 }
 
 func runPurge(c *dockerpkg.Client) error {
@@ -363,12 +319,45 @@ func runPurge(c *dockerpkg.Client) error {
 		}
 	}
 
+	// Remove images in dependency order: instance images (children) first, then
+	// prune dangling intermediate layers, then the base image (parent).
+	var instanceImages, baseImages []image.Summary
 	for _, img := range images {
+		if img.Labels["bac.container"] != "" {
+			instanceImages = append(instanceImages, img)
+		} else {
+			baseImages = append(baseImages, img)
+		}
+	}
+
+	for _, img := range instanceImages {
 		tag := img.ID
 		if len(img.RepoTags) > 0 {
 			tag = img.RepoTags[0]
 		}
 		if _, err := c.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
+		}
+	}
+
+	// Prune dangling images (untagged intermediate build layers that may still
+	// reference bac-base as their parent).
+	danglingFilter := filters.NewArgs()
+	danglingFilter.Add("dangling", "true")
+	if _, err := c.ImagesPrune(ctx, danglingFilter); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: pruning dangling images: %v\n", err)
+	}
+
+	for _, img := range baseImages {
+		tag := img.ID
+		if len(img.RepoTags) > 0 {
+			tag = img.RepoTags[0]
+		}
+		if _, err := c.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			// Skip "No such image" — already removed by the dangling prune step.
+			if strings.Contains(err.Error(), "No such image") {
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
 		}
 	}
@@ -394,7 +383,7 @@ func runPurge(c *dockerpkg.Client) error {
 	return nil
 }
 
-func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Agent) error {
+func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Agent, hostNetworkOff bool) error {
 	ctx := context.Background()
 
 	absPath, err := filepath.Abs(projectPath)
@@ -532,6 +521,19 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return fmt.Errorf("determining build requirements: %w", buildErr)
 	}
 
+	// Network mode change detection: only check when an image already exists
+	// (i.e., not a first run where both layers need building).
+	if !needBase && !flagRebuild {
+		persistedOff, err := dd.ReadHostNetworkOff()
+		if err != nil {
+			return fmt.Errorf("reading persisted host network mode: %w", err)
+		}
+		if persistedOff != hostNetworkOff {
+			fmt.Println("Network mode changed — run with --rebuild to update the image.")
+			return nil
+		}
+	}
+
 	if needBase {
 		// Check for UID/GID conflict in base image
 		strategy := dockerpkg.UserStrategyCreate
@@ -578,8 +580,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   constants.BaseImageTag,
 			Dockerfile: baseBuilder.Build(),
 			Labels:     baseLabels,
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 			NoCache:    flagRebuild,
 		}
 
@@ -595,7 +596,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	if needInstance {
-		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub, sshPort, hostNetworkOff)
 		instanceBuilder.Finalize()
 
 		instanceSpec := dockerpkg.ContainerSpec{
@@ -603,8 +604,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   imageTag,
 			Dockerfile: instanceBuilder.Build(),
 			Labels:     labels,
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 		}
 
 		fmt.Println("Building instance image...")
@@ -612,6 +612,10 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildOutput)
 			return fmt.Errorf("instance image build failed: %w", err)
+		}
+
+		if err := dd.WriteHostNetworkOff(hostNetworkOff); err != nil {
+			return fmt.Errorf("persisting host network mode: %w", err)
 		}
 	}
 
@@ -658,12 +662,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	spec := dockerpkg.ContainerSpec{
-		Name:          containerName,
-		ImageTag:      imageTag,
-		Mounts:        mounts,
-		SSHPort:       sshPort,
-		Labels:        labels,
-		RestartPolicy: flagDockerRestartPolicy,
+		Name:           containerName,
+		ImageTag:       imageTag,
+		Mounts:         mounts,
+		SSHPort:        sshPort,
+		Labels:         labels,
+		RestartPolicy:  flagDockerRestartPolicy,
+		HostNetworkOff: hostNetworkOff,
 	}
 
 	if _, err := dockerpkg.CreateContainer(ctx, c, spec); err != nil {

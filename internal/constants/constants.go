@@ -135,9 +135,8 @@ var Version = "dev"
 
 var (
 	// PublicKeyDefaultPaths lists the candidate Public_Key file paths on the Host,
-	// in order of precedence (highest first). The CLI tries each in turn before
-	// falling back to the --ssh-key flag value.
-	// Defined by Req 4.1: ~/.ssh/id_ed25519.pub → ~/.ssh/id_rsa.pub → --ssh-key.
+	// tried in order after the --ssh-key flag (which has highest precedence).
+	// Defined by Req 4.1: --ssh-key → ~/.ssh/id_ed25519.pub → ~/.ssh/id_rsa.pub.
 	// Declared as a var (not const) because Go does not support slice constants.
 	PublicKeyDefaultPaths = []string{
 		"~/.ssh/id_ed25519.pub",

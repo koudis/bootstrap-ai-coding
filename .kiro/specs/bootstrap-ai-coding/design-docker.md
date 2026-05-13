@@ -42,8 +42,10 @@ func NewBaseImageBuilder(info *hostinfo.Info, strategy UserStrategy,
 
 // NewInstanceImageBuilder produces the Dockerfile for bac-<name>:latest.
 // Starts with FROM bac-base:latest, adds only per-project SSH config + CMD.
+// When hostNetworkOff is false (default), sshd_config includes Port and ListenAddress
+// directives for host network mode. When true, sshd uses default port 22 (bridge mode).
 func NewInstanceImageBuilder(info *hostinfo.Info,
-    publicKey, hostKeyPriv, hostKeyPub string) *DockerfileBuilder
+    publicKey, hostKeyPriv, hostKeyPub string, sshPort int, hostNetworkOff bool) *DockerfileBuilder
 ```
 
 The existing `NewDockerfileBuilder` is replaced by these two functions. Agent `Install()` methods are called on the base builder only. The instance builder has no agent steps — it's just SSH key injection + CMD.
@@ -116,13 +118,36 @@ When `--rebuild` is set:
 3. Build Instance_Image (inherits fresh base)
 4. Create and start new container
 
+### `--host-network-off` and Instance_Image
+
+The `--host-network-off` flag (Req 26) affects the Instance_Image content:
+
+- **Default (host network mode):** `NewInstanceImageBuilder` appends `Port <SSH_Port>` and `ListenAddress 127.0.0.1` to sshd_config. The container is created with `NetworkMode: "host"` and no port bindings.
+- **`--host-network-off` set (bridge mode):** `NewInstanceImageBuilder` omits the `Port` and `ListenAddress` directives — sshd uses its default port 22. The container is created with bridge networking and Docker port bindings (`127.0.0.1:<SSH_Port>` → container port 22).
+
+Changing `--host-network-off` between invocations produces a different Instance_Image (different sshd_config). The CLI detects this mismatch and requires `--rebuild` to regenerate the Instance_Image.
+
 ### `--stop-and-remove` Behavior
 
 No change to image handling. Only the container is stopped/removed. Both Base_Image and Instance_Image remain cached for fast restart.
 
 ### `--purge` Behavior
 
-Removes all images (both `bac-base:latest` and all `bac-<name>:latest` instance images) via the existing `bac.managed` label filter.
+Image removal proceeds in dependency order:
+
+1. Remove Instance_Images (have `bac.container` label) — children of Base_Image
+2. `ImagesPrune(dangling=true)` — removes untagged intermediate build layers that still reference Base_Image
+3. Remove Base_Image (no `bac.container` label) — suppress "No such image" errors (image already removed by prune in step 2)
+
+Docker refuses to delete a parent image while children exist. Dangling build cache layers count as children. "No such image" errors in step 3 are skipped because the prune already removed those images.
+
+#### Reasoning
+
+- **`bac.container` label as partition key:** All bac-managed images carry `bac.managed=true`. Instance_Images additionally carry `bac.container=<name>`. This distinguishes children from parent without inspecting image ancestry or parsing FROM directives at runtime.
+- **Dangling prune between steps 1 and 3:** `--rebuild` creates new layers and old Instance_Image layers become dangling (untagged). These still reference `bac-base` as their parent in Docker's image graph. Without pruning, Base_Image removal fails with "image has dependent child images." The `dangling=true` filter only removes untagged, unreferenced images — it cannot remove tagged images from other tools.
+- **Suppressing "No such image":** The prune in step 2 may remove images that were in the original image list (captured before removal began). Step 3 then attempts to remove an already-gone image. This is the desired outcome, so the error is skipped.
+
+**Validates: TL-7**
 
 ### Constants Addition
 

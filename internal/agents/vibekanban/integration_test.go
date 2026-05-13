@@ -1,14 +1,16 @@
 //go:build integration
 
-package buildresources_test
+package vibekanban_test
 
 import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/agent"
-	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/vibekanban"
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
 	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
@@ -62,7 +64,7 @@ func TestMain(m *testing.M) {
 func setupSharedContainer() error {
 	ctx := context.Background()
 
-	projectDir, err := os.MkdirTemp("", "bac-buildresources-integration-*")
+	projectDir, err := os.MkdirTemp("", "bac-vibekanban-integration-*")
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
@@ -105,18 +107,18 @@ func setupSharedContainer() error {
 		"",
 	)
 
-	brAgent, err := agent.Lookup(constants.BuildResourcesAgentName)
+	vkAgent, err := agent.Lookup(constants.VibeKanbanAgentName)
 	if err != nil {
-		return fmt.Errorf("looking up build-resources agent: %w", err)
+		return fmt.Errorf("looking up vibe-kanban agent: %w", err)
 	}
-	brAgent.Install(builder)
+	vkAgent.Install(builder)
 
-	port, err := findFreePortBR()
+	port, err := findFreePortVK()
 	if err != nil {
 		return fmt.Errorf("finding free port: %w", err)
 	}
 
-	sharedContainerName = constants.ContainerNamePrefix + sanitizeBR(dirName)
+	sharedContainerName = constants.ContainerNamePrefix + sanitizeVK(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
 
@@ -133,7 +135,7 @@ func setupSharedContainer() error {
 
 	_, err = docker.BuildImage(ctx, sharedClient, baseSpec, true)
 	if err != nil {
-		return fmt.Errorf("building base image with build-resources: %w", err)
+		return fmt.Errorf("building base image with vibe-kanban: %w", err)
 	}
 
 	// Build instance image
@@ -165,7 +167,7 @@ func setupSharedContainer() error {
 
 	_, err = docker.BuildImage(ctx, sharedClient, spec, true)
 	if err != nil {
-		return fmt.Errorf("building container image with build-resources: %w", err)
+		return fmt.Errorf("building container image with vibe-kanban: %w", err)
 	}
 
 	_, err = docker.CreateContainer(ctx, sharedClient, spec)
@@ -182,6 +184,9 @@ func setupSharedContainer() error {
 	if err != nil {
 		return fmt.Errorf("waiting for SSH to be ready: %w", err)
 	}
+
+	// Give vibe-kanban time to start up via the supervisor
+	time.Sleep(5 * time.Second)
 
 	return nil
 }
@@ -204,109 +209,180 @@ func teardownSharedContainer() {
 }
 
 // ----------------------------------------------------------------------------
-// TestPython3Available
-// Validates: BR-2.1
+// TestVibeKanbanInstallsAndRuns
+// Validates: VK-2.3, VK-3.1, VK-5.1, VK-5.2
+// Full image build, binary present (which vibe-kanban exits 0), process running
 // ----------------------------------------------------------------------------
 
-func TestPython3Available(t *testing.T) {
+func TestVibeKanbanInstallsAndRuns(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
-	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"python3", "--version"})
-	require.NoError(t, err, "exec python3 --version")
-	require.Equal(t, 0, exitCode, "expected 'python3 --version' to exit 0")
+
+	// Verify binary is present
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"which", "vibe-kanban"})
+	require.NoError(t, err, "exec which vibe-kanban")
+	require.Equal(t, 0, exitCode, "expected 'which vibe-kanban' to exit 0 (binary present)")
+
+	// Verify process is running
+	exitCode, err = docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"pgrep", "-f", "vibe-kanban"})
+	require.NoError(t, err, "exec pgrep -f vibe-kanban")
+	require.Equal(t, 0, exitCode, "expected vibe-kanban process to be running")
 }
 
 // ----------------------------------------------------------------------------
-// TestUVAvailable
-// Validates: BR-2.2, BR-2.3
+// TestVibeKanbanHealthCheck
+// Validates: VK-5.1, VK-5.2
+// HealthCheck passes on a live container
 // ----------------------------------------------------------------------------
 
-func TestUVAvailable(t *testing.T) {
+func TestVibeKanbanHealthCheck(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
-	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"uv", "--version"})
-	require.NoError(t, err, "exec uv --version")
-	require.Equal(t, 0, exitCode, "expected 'uv --version' to exit 0 (installed system-wide to /usr/local/bin)")
+
+	vkAgent, err := agent.Lookup(constants.VibeKanbanAgentName)
+	require.NoError(t, err, "looking up vibe-kanban agent")
+
+	err = vkAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	require.NoError(t, err, "vibe-kanban HealthCheck should return no error")
 }
 
 // ----------------------------------------------------------------------------
-// TestCMakeAvailable
-// Validates: BR-2.4
+// TestVibeKanbanPortDiscovery
+// Validates: VK-8.1, VK-8.2
+// Port is discoverable via ss after startup
 // ----------------------------------------------------------------------------
 
-func TestCMakeAvailable(t *testing.T) {
+func TestVibeKanbanPortDiscovery(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
-	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"cmake", "--version"})
-	require.NoError(t, err, "exec cmake --version")
-	require.Equal(t, 0, exitCode, "expected 'cmake --version' to exit 0")
+
+	port := discoverVibeKanbanPort(t, ctx)
+	require.Greater(t, port, 0, "expected to discover a valid port for vibe-kanban")
+	require.LessOrEqual(t, port, 65535, "port must be a valid TCP port")
 }
 
 // ----------------------------------------------------------------------------
-// TestJavacAvailable
-// Validates: BR-2.6
+// TestVibeKanbanCrashRecovery
+// Validates: VK-3.3, VK-3.5
+// Process restarts after being killed (kill + wait + verify running)
 // ----------------------------------------------------------------------------
 
-func TestJavacAvailable(t *testing.T) {
+func TestVibeKanbanCrashRecovery(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
-	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"javac", "-version"})
-	require.NoError(t, err, "exec javac -version")
-	require.Equal(t, 0, exitCode, "expected 'javac -version' to exit 0")
+
+	// Discover the current vibe-kanban port
+	port := discoverVibeKanbanPort(t, ctx)
+	require.Greater(t, port, 0, "must discover vibe-kanban port before killing")
+
+	// Kill the vibe-kanban server process by finding what's listening on its port.
+	// This avoids accidentally killing the supervisor script.
+	_, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName,
+		[]string{"bash", "-c", fmt.Sprintf(
+			"PID=$(ss -tlnp sport = :%d | grep -oP 'pid=\\K[0-9]+' | head -1); [ -n \"$PID\" ] && kill $PID; exit 0",
+			port)})
+	require.NoError(t, err, "exec kill vibe-kanban via port lookup")
+
+	// Wait for the supervisor to restart it (DELAY_SECONDS=5 + startup + port discovery)
+	time.Sleep(30 * time.Second)
+
+	// Verify the server is running again by reading the port file
+	newPort := discoverVibeKanbanPort(t, ctx)
+	require.Greater(t, newPort, 0, "expected vibe-kanban process to be running after crash recovery")
 }
 
 // ----------------------------------------------------------------------------
-// TestGoAvailable
-// Validates: BR-2.7
+// TestVibeKanbanAccessibleFromHost
+// Validates: VK-8.1, VK-8.2
+// HTTP GET to localhost:port returns 2xx (host network mode)
 // ----------------------------------------------------------------------------
 
-func TestGoAvailable(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker not available")
-	}
-
-	ctx := context.Background()
-	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"bash", "-lc", "go version"})
-	require.NoError(t, err, "exec go version")
-	require.Equal(t, 0, exitCode, "expected 'go version' to exit 0")
-}
-
-// ----------------------------------------------------------------------------
-// TestBuildResourcesHealthCheck
-// Validates: BR-4
-// ----------------------------------------------------------------------------
-
-func TestBuildResourcesHealthCheck(t *testing.T) {
+func TestVibeKanbanAccessibleFromHost(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
 
 	ctx := context.Background()
 
-	brAgent, err := agent.Lookup(constants.BuildResourcesAgentName)
-	require.NoError(t, err, "looking up build-resources agent")
+	port := discoverVibeKanbanPort(t, ctx)
+	require.Greater(t, port, 0, "must discover vibe-kanban port before testing HTTP access")
 
-	err = brAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
-	require.NoError(t, err, "build-resources HealthCheck should return no error")
+	url := fmt.Sprintf("http://localhost:%d", port)
+
+	// Retry HTTP GET for up to 15 seconds (server may need time after restart)
+	var resp *http.Response
+	var httpErr error
+	deadline := time.Now().Add(15 * time.Second)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	for time.Now().Before(deadline) {
+		resp, httpErr = client.Get(url)
+		if httpErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body.Close()
+			return // Success
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	if httpErr != nil {
+		t.Fatalf("HTTP GET %s failed: %v", url, httpErr)
+	}
+	if resp != nil {
+		t.Fatalf("HTTP GET %s returned status %d, expected 2xx", url, resp.StatusCode)
+	}
+	t.Fatalf("HTTP GET %s timed out without a successful response", url)
 }
 
 // ----------------------------------------------------------------------------
 // Internal helpers
 // ----------------------------------------------------------------------------
 
-func findFreePortBR() (int, error) {
+// discoverVibeKanbanPort reads the port file written by the supervisor script.
+// Retries for up to 60 seconds since the supervisor needs time to start
+// vibe-kanban and discover its port.
+func discoverVibeKanbanPort(t *testing.T, ctx context.Context) int {
+	t.Helper()
+
+	const portFile = "/tmp/vibe-kanban.port"
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		exitCode, output, err := docker.ExecInContainerWithOutput(ctx, sharedClient, sharedContainerName,
+			[]string{"cat", portFile})
+		if err != nil {
+			t.Logf("cat port file error: %v", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		if exitCode == 0 {
+			portStr := strings.TrimSpace(output)
+			port, err := strconv.Atoi(portStr)
+			if err == nil && port > 0 {
+				return port
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	t.Fatal("timed out waiting for vibe-kanban port file (60s)")
+	return 0
+}
+
+func findFreePortVK() (int, error) {
 	for port := constants.SSHPortStart; port < 65535; port++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err == nil {
@@ -317,7 +393,7 @@ func findFreePortBR() (int, error) {
 	return 0, fmt.Errorf("no free port found starting at %d", constants.SSHPortStart)
 }
 
-func sanitizeBR(s string) string {
+func sanitizeVK(s string) string {
 	s = strings.ToLower(s)
 	var b strings.Builder
 	for _, r := range s {

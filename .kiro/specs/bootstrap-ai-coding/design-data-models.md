@@ -43,6 +43,7 @@ type Config struct {
     NoUpdateKnownHosts bool
     NoUpdateSSHConfig  bool
     RestartPolicy      string // Docker restart policy (default: "unless-stopped")
+    HostNetworkOff     bool   // Req 26: when true, use bridge mode instead of host network
     CredStoreOverrides map[string]string
     HostInfo           *hostinfo.Info  // Req 22: runtime-resolved host user identity
 }
@@ -52,14 +53,16 @@ type Config struct {
 
 ```go
 type ContainerSpec struct {
-    Name          string
-    ImageTag      string
-    Dockerfile    string
-    Mounts        []Mount
-    SSHPort       int
-    Labels        map[string]string
-    RestartPolicy string             // Req 25: Docker restart policy name
-    HostInfo      *hostinfo.Info     // Req 22: runtime-resolved host user identity (UID, GID, Username, HomeDir)
+    Name           string
+    ImageTag       string
+    Dockerfile     string
+    Mounts         []Mount
+    SSHPort        int
+    Labels         map[string]string
+    NoCache        bool               // When true, disable Docker layer cache during image build
+    HostNetworkOff bool               // Req 26: when true, use bridge mode; when false (default), use host network
+    RestartPolicy  string             // Req 25: Docker restart policy name
+    HostInfo       *hostinfo.Info     // Req 22: runtime-resolved host user identity (UID, GID, Username, HomeDir)
 }
 
 type Mount struct {
@@ -93,7 +96,7 @@ type SessionSummary struct {
 | `--stop-and-remove` and `--purge` both set | CLI-1 | Descriptive error → stderr, exit 1 |
 | START or STOP mode and `<project-path>` absent | CLI-2 | Usage message → stderr, exit 1 |
 | PURGE mode and `<project-path>` provided | CLI-2 | Descriptive error → stderr, exit 1 |
-| STOP or PURGE mode and any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config`, `--verbose`, `--docker-restart-policy` set | CLI-3 | Descriptive error naming the incompatible flag(s) → stderr, exit 1 |
+| STOP or PURGE mode and any of `--agents`, `--port`, `--ssh-key`, `--rebuild`, `--no-update-known-hosts`, `--no-update-ssh-config`, `--verbose`, `--docker-restart-policy`, `--host-network-off` set | CLI-3 | Descriptive error naming the incompatible flag(s) → stderr, exit 1 |
 | `--port` value outside 1024–65535 | CLI-5 | Descriptive error → stderr, exit 1 |
 | `--agents` parses to empty list | CLI-6 | Descriptive error → stderr, exit 1 |
 | `--agents` contains unknown agent ID | CLI-6 | Unknown ID + available IDs → stderr, exit 1 |

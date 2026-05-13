@@ -4,6 +4,7 @@
 package claude_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -318,6 +319,22 @@ func TestClaudeInstallNodeAlreadyInstalled(t *testing.T) {
 	added := linesAfter - linesBefore
 	require.True(t, added == 3 || added == 4,
 		"must add 3 RUN steps (prereqs + npm + symlink) plus optionally 1 memory injection step, got %d", added)
+}
+
+// ---------------------------------------------------------------------------
+// SummaryInfo no-op test
+// ---------------------------------------------------------------------------
+
+// TestSummaryInfoReturnsNil verifies that the Claude Code agent's SummaryInfo
+// method returns (nil, nil) since it has no additional session summary info.
+// Validates: SI-6.1
+func TestSummaryInfoReturnsNil(t *testing.T) {
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err, "claude agent must be registered")
+
+	info, err := a.SummaryInfo(context.Background(), nil, "")
+	require.NoError(t, err)
+	require.Nil(t, info)
 }
 
 // ---------------------------------------------------------------------------

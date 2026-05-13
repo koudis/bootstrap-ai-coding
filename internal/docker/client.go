@@ -14,6 +14,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -138,6 +139,10 @@ func (c *Client) ImageList(ctx context.Context, options image.ListOptions) ([]im
 
 func (c *Client) ImageRemove(ctx context.Context, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
 	return c.inner.ImageRemove(ctx, imageID, options)
+}
+
+func (c *Client) ImagesPrune(ctx context.Context, pruneFilter filters.Args) (image.PruneReport, error) {
+	return c.inner.ImagesPrune(ctx, pruneFilter)
 }
 
 func (c *Client) ContainerExecCreate(ctx context.Context, containerID string, options container.ExecOptions) (container.ExecCreateResponse, error) {

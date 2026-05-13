@@ -17,6 +17,7 @@ type PurgeDockerAPI interface {
 	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
 	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
 	ImageRemove(ctx context.Context, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error)
+	ImagesPrune(ctx context.Context, pruneFilter filters.Args) (image.PruneReport, error)
 }
 
 // RunPurgeWith implements the container and image removal portion of the purge
@@ -53,8 +54,40 @@ func RunPurgeWith(api PurgeDockerAPI) error {
 		}
 	}
 
-	// Remove all images.
+	// Remove images in dependency order: instance images (children) first, then
+	// prune dangling intermediate layers, then the base image (parent). Docker
+	// refuses to delete a parent image while child images still reference it via
+	// FROM — this includes untagged intermediate build cache layers.
+	var instanceImages, baseImages []image.Summary
 	for _, img := range images {
+		if img.Labels["bac.container"] != "" {
+			instanceImages = append(instanceImages, img)
+		} else {
+			baseImages = append(baseImages, img)
+		}
+	}
+
+	// 1. Remove instance images (children of bac-base).
+	for _, img := range instanceImages {
+		if _, err := api.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			tag := img.ID
+			if len(img.RepoTags) > 0 {
+				tag = img.RepoTags[0]
+			}
+			fmt.Printf("warning: removing image %s: %v\n", tag, err)
+		}
+	}
+
+	// 2. Prune dangling images (untagged intermediate build layers that may
+	// still reference bac-base as their parent).
+	danglingFilter := filters.NewArgs()
+	danglingFilter.Add("dangling", "true")
+	if _, err := api.ImagesPrune(ctx, danglingFilter); err != nil {
+		fmt.Printf("warning: pruning dangling images: %v\n", err)
+	}
+
+	// 3. Remove base image(s) now that children are gone.
+	for _, img := range baseImages {
 		if _, err := api.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
 			tag := img.ID
 			if len(img.RepoTags) > 0 {

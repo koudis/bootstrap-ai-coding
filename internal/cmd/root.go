@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -74,6 +75,7 @@ func ValidateStartOnlyFlags(mode Mode, changedFlags []string) error {
 		"no-update-ssh-config":  true,
 		"verbose":               true,
 		"docker-restart-policy": true,
+		"host-network-off":      true,
 	}
 	for _, name := range changedFlags {
 		if startOnly[name] {
@@ -108,18 +110,21 @@ type SessionSummary struct {
 	SSHPort       int
 	SSHConnect    string
 	EnabledAgents []string
+	AgentInfo     []agent.KeyValue
 }
 
-// FormatSessionSummary formats a SessionSummary into the five-line output.
+// FormatSessionSummary formats a SessionSummary into the output lines.
 func FormatSessionSummary(s SessionSummary) string {
-	return fmt.Sprintf(
-		"Data directory:  %s\nProject directory: %s\nSSH port:        %d\nSSH connect:     %s\nEnabled agents:  %s\n",
-		s.DataDir,
-		s.ProjectDir,
-		s.SSHPort,
-		s.SSHConnect,
-		strings.Join(s.EnabledAgents, ", "),
-	)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Data directory:  %s\n", s.DataDir)
+	fmt.Fprintf(&sb, "Project directory: %s\n", s.ProjectDir)
+	fmt.Fprintf(&sb, "SSH port:        %d\n", s.SSHPort)
+	fmt.Fprintf(&sb, "SSH connect:     %s\n", s.SSHConnect)
+	fmt.Fprintf(&sb, "Enabled agents:  %s\n", strings.Join(s.EnabledAgents, ", "))
+	for _, kv := range s.AgentInfo {
+		fmt.Fprintf(&sb, "%-17s%s\n", kv.Key+":", kv.Value)
+	}
+	return sb.String()
 }
 
 // ParseAgentsFlag splits a comma-separated agent ID string, trims whitespace,
@@ -147,6 +152,7 @@ var (
 	flagNoUpdateSSHConfig   bool
 	flagVerbose             bool
 	flagDockerRestartPolicy string
+	flagHostNetworkOff      bool
 )
 
 var rootCmd = &cobra.Command{
@@ -175,6 +181,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagNoUpdateSSHConfig, "no-update-ssh-config", false, "Skip automatic ~/.ssh/config management")
 	rootCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Stream Docker build output to stdout in real time")
 	rootCmd.Flags().StringVar(&flagDockerRestartPolicy, "docker-restart-policy", constants.DefaultRestartPolicy, "Docker restart policy for the container (no, always, unless-stopped, on-failure)")
+	rootCmd.Flags().BoolVar(&flagHostNetworkOff, "host-network-off", false, "Disable host network mode; use bridge networking with port mapping")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -253,7 +260,7 @@ func run(cmd *cobra.Command, args []string) error {
 	case ModePurge:
 		return runPurge(dockerClient)
 	default:
-		return runStart(dockerClient, args[0], enabledAgents)
+		return runStart(dockerClient, args[0], enabledAgents, flagHostNetworkOff)
 	}
 }
 
@@ -363,12 +370,45 @@ func runPurge(c *dockerpkg.Client) error {
 		}
 	}
 
+	// Remove images in dependency order: instance images (children) first, then
+	// prune dangling intermediate layers, then the base image (parent).
+	var instanceImages, baseImages []image.Summary
 	for _, img := range images {
+		if img.Labels["bac.container"] != "" {
+			instanceImages = append(instanceImages, img)
+		} else {
+			baseImages = append(baseImages, img)
+		}
+	}
+
+	for _, img := range instanceImages {
 		tag := img.ID
 		if len(img.RepoTags) > 0 {
 			tag = img.RepoTags[0]
 		}
 		if _, err := c.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
+		}
+	}
+
+	// Prune dangling images (untagged intermediate build layers that may still
+	// reference bac-base as their parent).
+	danglingFilter := filters.NewArgs()
+	danglingFilter.Add("dangling", "true")
+	if _, err := c.ImagesPrune(ctx, danglingFilter); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: pruning dangling images: %v\n", err)
+	}
+
+	for _, img := range baseImages {
+		tag := img.ID
+		if len(img.RepoTags) > 0 {
+			tag = img.RepoTags[0]
+		}
+		if _, err := c.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true}); err != nil {
+			// Skip "No such image" — already removed by the dangling prune step.
+			if strings.Contains(err.Error(), "No such image") {
+				continue
+			}
 			fmt.Fprintf(os.Stderr, "warning: removing image %s: %v\n", tag, err)
 		}
 	}
@@ -394,7 +434,7 @@ func runPurge(c *dockerpkg.Client) error {
 	return nil
 }
 
-func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Agent) error {
+func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Agent, hostNetworkOff bool) error {
 	ctx := context.Background()
 
 	absPath, err := filepath.Abs(projectPath)
@@ -532,6 +572,19 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return fmt.Errorf("determining build requirements: %w", buildErr)
 	}
 
+	// Network mode change detection: only check when an image already exists
+	// (i.e., not a first run where both layers need building).
+	if !needBase && !flagRebuild {
+		persistedOff, err := dd.ReadHostNetworkOff()
+		if err != nil {
+			return fmt.Errorf("reading persisted host network mode: %w", err)
+		}
+		if persistedOff != hostNetworkOff {
+			fmt.Println("Network mode changed — run with --rebuild to update the image.")
+			return nil
+		}
+	}
+
 	if needBase {
 		// Check for UID/GID conflict in base image
 		strategy := dockerpkg.UserStrategyCreate
@@ -578,8 +631,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   constants.BaseImageTag,
 			Dockerfile: baseBuilder.Build(),
 			Labels:     baseLabels,
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 			NoCache:    flagRebuild,
 		}
 
@@ -595,7 +647,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	if needInstance {
-		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		instanceBuilder := dockerpkg.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub, sshPort, hostNetworkOff)
 		instanceBuilder.Finalize()
 
 		instanceSpec := dockerpkg.ContainerSpec{
@@ -603,8 +655,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			ImageTag:   imageTag,
 			Dockerfile: instanceBuilder.Build(),
 			Labels:     labels,
-			HostUID:    info.UID,
-			HostGID:    info.GID,
+			HostInfo: info,
 		}
 
 		fmt.Println("Building instance image...")
@@ -612,6 +663,10 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		if err != nil {
 			fmt.Fprint(os.Stderr, buildOutput)
 			return fmt.Errorf("instance image build failed: %w", err)
+		}
+
+		if err := dd.WriteHostNetworkOff(hostNetworkOff); err != nil {
+			return fmt.Errorf("persisting host network mode: %w", err)
 		}
 	}
 
@@ -629,7 +684,19 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			if err := sshpkg.SyncSSHConfig(containerName, sshPort, info.Username, flagNoUpdateSSHConfig); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: syncing SSH config: %v\n", err)
 			}
-			printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
+
+			// Collect agent summary info.
+			var agentInfo []agent.KeyValue
+			for _, a := range enabledAgents {
+				kvs, err := a.SummaryInfo(ctx, c, containerName)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: %s summary info: %v\n", a.ID(), err)
+					continue
+				}
+				agentInfo = append(agentInfo, kvs...)
+			}
+
+			printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs, agentInfo)
 			return nil
 		}
 		// --rebuild: stop the running container so it gets recreated from the new image.
@@ -658,12 +725,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 	}
 
 	spec := dockerpkg.ContainerSpec{
-		Name:          containerName,
-		ImageTag:      imageTag,
-		Mounts:        mounts,
-		SSHPort:       sshPort,
-		Labels:        labels,
-		RestartPolicy: flagDockerRestartPolicy,
+		Name:           containerName,
+		ImageTag:       imageTag,
+		Mounts:         mounts,
+		SSHPort:        sshPort,
+		Labels:         labels,
+		RestartPolicy:  flagDockerRestartPolicy,
+		HostNetworkOff: hostNetworkOff,
 	}
 
 	if _, err := dockerpkg.CreateContainer(ctx, c, spec); err != nil {
@@ -679,6 +747,13 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		return fmt.Errorf("container started but SSH did not become ready: %w", err)
 	}
 
+	// Run health checks for all enabled agents (CC-5, AC-5, BR-4, VK-5).
+	for _, a := range enabledAgents {
+		if err := a.HealthCheck(ctx, c, containerName); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s health check: %v\n", a.ID(), err)
+		}
+	}
+
 	// Sync known_hosts with the container's SSH host key (Req 18.1–18.9).
 	if err := sshpkg.SyncKnownHosts(sshPort, hostKeyPub, flagNoUpdateKnownHosts); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: syncing known_hosts: %v\n", err)
@@ -690,23 +765,59 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 
 	for _, s := range agentStatuses {
 		if !s.hasCredentials {
-			fmt.Printf("Authenticate %s inside the container: run 'claude' and complete the login flow.\n", s.a.ID())
+			fmt.Printf("Authenticate %s inside the container.\n", s.a.ID())
 		}
 	}
 
-	printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs)
+	// Collect agent summary info.
+	var agentInfo []agent.KeyValue
+	for _, a := range enabledAgents {
+		kvs, err := a.SummaryInfo(ctx, c, containerName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s summary info: %v\n", a.ID(), err)
+			continue
+		}
+		agentInfo = append(agentInfo, kvs...)
+	}
+
+	printSessionSummary(dd, absPath, containerName, sshPort, enabledIDs, agentInfo)
 	return nil
 }
 
-func printSessionSummary(dd *datadir.DataDir, projectDir string, containerName string, sshPort int, agentIDs []string) {
+
+
+func printSessionSummary(dd *datadir.DataDir, projectDir string, containerName string, sshPort int, agentIDs []string, agentInfo []agent.KeyValue) {
 	summary := SessionSummary{
 		DataDir:       dd.Path(),
 		ProjectDir:    projectDir,
 		SSHPort:       sshPort,
 		SSHConnect:    "ssh " + containerName,
 		EnabledAgents: agentIDs,
+		AgentInfo:     agentInfo,
 	}
 	fmt.Print(FormatSessionSummary(summary))
+}
+
+// AgentInfoResult represents the result of calling SummaryInfo on a single agent.
+type AgentInfoResult struct {
+	KeyValues []agent.KeyValue
+	Err       error
+}
+
+// CollectAgentInfo takes a slice of AgentInfoResult (one per agent, in declared
+// order) and returns the collected KeyValue pairs. Results with a non-nil Err
+// are excluded; all others are appended in order.
+//
+// Validates: SI-2.2, SI-3.2, SI-3.3
+func CollectAgentInfo(results []AgentInfoResult) []agent.KeyValue {
+	var collected []agent.KeyValue
+	for _, r := range results {
+		if r.Err != nil {
+			continue
+		}
+		collected = append(collected, r.KeyValues...)
+	}
+	return collected
 }
 
 // StringSlicesEqual reports whether a and b contain the same elements in the same order.

@@ -80,8 +80,8 @@ import (
 - Container names: `bac-<dirname>` derived from the project directory name (sanitized to `[a-z0-9_.-]`); falls back to `bac-<parentdir>_<dirname>` on conflict, then `bac-<parentdir>_<dirname>-2`, `-3`, … — checked only against existing `bac-`-prefixed containers
 - Tool data directory: `~/.config/bootstrap-ai-coding/<container-name>/` — stores SSH port, SSH host key, agent manifest
 - Base image: always `ubuntu:26.04` (constants.BaseContainerImage) — no other base image or Ubuntu version
-- Container user: `dev` (constants.ContainerUser), UID/GID matching the host user who invoked the CLI
-- Container user home: `/home/dev` (constants.ContainerUserHome)
+- Container user: matches Host_User's username (resolved at runtime via `hostinfo.Current()`), UID/GID matching the host user who invoked the CLI
+- Container user home: matches Host_User's home directory path (resolved at runtime via `hostinfo.Current()`)
 - Workspace mount: `/workspace` (constants.WorkspaceMountPath)
 - SSH port: starts at `2222` (constants.SSHPortStart), increments until free, persisted per project
 - SSH host key type: `ed25519` (constants.SSHHostKeyType) — generated once per project, reused across rebuilds

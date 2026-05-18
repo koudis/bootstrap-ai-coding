@@ -33,6 +33,7 @@ var (
 	sharedSSHPort       int
 	sharedClient        *docker.Client
 	sharedImageTag      string
+	sharedProjectDir    string
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,
@@ -68,6 +69,7 @@ func setupSharedContainer() error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
+	sharedProjectDir = projectDir
 	dirName := filepath.Base(projectDir)
 
 	hostKeyPriv, hostKeyPub, err := sshpkg.GenerateHostKeyPair()
@@ -204,6 +206,11 @@ func teardownSharedContainer() {
 			if tag == sharedImageTag {
 				_, _ = sharedClient.ImageRemove(ctx, img.ID, dockerimage.RemoveOptions{Force: true})
 			}
+		}
+	}
+	if sharedProjectDir != "" {
+		if err := os.RemoveAll(sharedProjectDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: removing temp project dir: %v\n", err)
 		}
 	}
 }

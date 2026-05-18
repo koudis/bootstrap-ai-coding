@@ -649,8 +649,9 @@ func TestHostNetworkModeSSHReachable(t *testing.T) {
 	containerName := constants.ContainerNamePrefix + "hostnet-" + sanitize(dirName)
 	instanceImageTag := containerName + ":latest"
 
-	// Use a high port to avoid conflicts
-	sshPort := 22222
+	// Use a dynamically allocated port to avoid conflicts
+	sshPort, err := findFreePort()
+	require.NoError(t, err, "finding free port")
 
 	// Determine user strategy
 	strategy := docker.UserStrategyCreate
@@ -761,8 +762,9 @@ func TestHostNetworkCanReachHostService(t *testing.T) {
 	containerName := constants.ContainerNamePrefix + "hostreach-" + sanitize(dirName)
 	instanceImageTag := containerName + ":latest"
 
-	// Use a high port for SSH to avoid conflicts
-	sshPort := 22224
+	// Use a dynamically allocated port to avoid conflicts
+	sshPort, err := findFreePort()
+	require.NoError(t, err, "finding free port")
 
 	// Determine user strategy
 	strategy := docker.UserStrategyCreate
@@ -873,8 +875,9 @@ func TestBridgeModeSSHReachable(t *testing.T) {
 	containerName := constants.ContainerNamePrefix + "bridge-" + sanitize(dirName)
 	instanceImageTag := containerName + ":latest"
 
-	// Use a different high port to avoid conflicts with host network test
-	sshPort := 22223
+	// Use a dynamically allocated port to avoid conflicts
+	sshPort, err := findFreePort()
+	require.NoError(t, err, "finding free port")
 
 	// Determine user strategy
 	strategy := docker.UserStrategyCreate

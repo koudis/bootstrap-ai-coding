@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
@@ -36,7 +37,7 @@ func newFakeDockerClient(t *testing.T) (*docker.Client, chan createRequest) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Match the containers/create endpoint (path includes version prefix)
-		if r.Method == http.MethodPost && r.URL.Path[len(r.URL.Path)-18:] == "/containers/create" {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/containers/create") {
 			var req createRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatalf("failed to decode create request: %v", err)

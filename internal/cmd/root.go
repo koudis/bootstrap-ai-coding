@@ -395,6 +395,7 @@ func runPurge(c *dockerpkg.Client) error {
 	// reference bac-base as their parent).
 	danglingFilter := filters.NewArgs()
 	danglingFilter.Add("dangling", "true")
+	danglingFilter.Add("label", "bac.managed=true")
 	if _, err := c.ImagesPrune(ctx, danglingFilter); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: pruning dangling images: %v\n", err)
 	}

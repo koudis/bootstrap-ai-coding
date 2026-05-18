@@ -84,7 +84,7 @@ PORT_FILE="/tmp/vibe-kanban.port"
 LOG_FILE="/tmp/vibe-kanban.log"
 RESTART_TIMES=()
 while true; do
-    NOW=$(date +%%%%s)
+    NOW=$(date +%%s)
     PRUNED=()
     for ts in "${RESTART_TIMES[@]}"; do
         if (( NOW - ts < WINDOW_SECONDS )); then
@@ -96,7 +96,7 @@ while true; do
         echo "vibe-kanban-supervisor: exceeded $MAX_RESTARTS restarts in ${WINDOW_SECONDS}s, giving up" >&2
         exit 1
     fi
-    RESTART_TIMES+=("$(date +%%%%s)")
+    RESTART_TIMES+=("$(date +%%s)")
     rm -f "$PORT_FILE"
     su -c "exec env BROWSER=none HOST=0.0.0.0 vibe-kanban" "%s" > "$LOG_FILE" 2>&1 &
     VK_PID=$!

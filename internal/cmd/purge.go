@@ -82,6 +82,7 @@ func RunPurgeWith(api PurgeDockerAPI) error {
 	// still reference bac-base as their parent).
 	danglingFilter := filters.NewArgs()
 	danglingFilter.Add("dangling", "true")
+	danglingFilter.Add("label", "bac.managed=true")
 	if _, err := api.ImagesPrune(ctx, danglingFilter); err != nil {
 		fmt.Printf("warning: pruning dangling images: %v\n", err)
 	}

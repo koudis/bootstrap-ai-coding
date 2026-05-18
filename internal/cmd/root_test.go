@@ -500,12 +500,11 @@ func TestPropertyFormatSessionSummaryAgentInfo(t *testing.T) {
 		output := cmd.FormatSessionSummary(summary)
 		lines := strings.Split(output, "\n")
 
-		// (a) Every KeyValue.Key and KeyValue.Value appears in the output.
+		// (a) Every KeyValue produces an exact formatted line in the output.
 		for _, kv := range agentInfo {
-			require.Contains(t, output, kv.Key+":",
-				"output must contain key %q with colon", kv.Key)
-			require.Contains(t, output, kv.Value,
-				"output must contain value %q", kv.Value)
+			expectedLine := fmt.Sprintf("%-17s%s", kv.Key+":", kv.Value)
+			require.Contains(t, output, expectedLine,
+				"output must contain exact agent info line for key %q", kv.Key)
 		}
 
 		// (b) All agent info lines appear after the "Enabled agents" line.
@@ -520,12 +519,18 @@ func TestPropertyFormatSessionSummaryAgentInfo(t *testing.T) {
 			"output must contain 'Enabled agents:' line")
 
 		for _, kv := range agentInfo {
+			expectedLine := fmt.Sprintf("%-17s%s", kv.Key+":", kv.Value)
+			found := false
 			for i, line := range lines {
-				if strings.Contains(line, kv.Key+":") && strings.Contains(line, kv.Value) {
+				if line == expectedLine {
 					require.Greater(t, i, enabledAgentsLineIdx,
 						"agent info line for key %q must appear after 'Enabled agents:' line", kv.Key)
+					found = true
+					break
 				}
 			}
+			require.True(t, found,
+				"expected exact line %q in output", expectedLine)
 		}
 
 		// (c) When AgentInfo is nil or empty, no extra lines beyond the standard five fields.

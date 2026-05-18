@@ -132,9 +132,9 @@ DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName + "," + BuildRe
 | `HasCredentials(storePath)` | `(true, nil)` always |
 | `HealthCheck(ctx, c, containerID)` | Binary check + process running check with retries |
 
-### Session Summary Extension
+### Session Summary: Agent-Owned SummaryInfo Pattern
 
-The `SessionSummary` struct in `cmd/root.go` needs a new field:
+The session summary is **core-agnostic**. There is no Vibe Kanban–specific field on `SessionSummary`. Instead, every agent implements `SummaryInfo(ctx, c, containerID) ([]agent.KeyValue, error)` and the core renderer (`FormatSessionSummary`) displays whatever key-value pairs agents provide:
 
 ```go
 type SessionSummary struct {
@@ -143,11 +143,11 @@ type SessionSummary struct {
     SSHPort       int
     SSHConnect    string
     EnabledAgents []string
-    VibeKanbanURL string // empty if not discovered or not enabled
+    AgentInfo     []agent.KeyValue // populated by calling SummaryInfo on each enabled agent
 }
 ```
 
-`FormatSessionSummary` conditionally includes the Vibe Kanban line:
+`FormatSessionSummary` iterates `AgentInfo` without knowledge of which agent produced which entry:
 
 ```go
 func FormatSessionSummary(s SessionSummary) string {
@@ -157,26 +157,18 @@ func FormatSessionSummary(s SessionSummary) string {
     fmt.Fprintf(&sb, "SSH port:        %d\n", s.SSHPort)
     fmt.Fprintf(&sb, "SSH connect:     %s\n", s.SSHConnect)
     fmt.Fprintf(&sb, "Enabled agents:  %s\n", strings.Join(s.EnabledAgents, ", "))
-    if s.VibeKanbanURL != "" {
-        fmt.Fprintf(&sb, "Vibe Kanban:     %s\n", s.VibeKanbanURL)
+    for _, kv := range s.AgentInfo {
+        fmt.Fprintf(&sb, "%-17s%s\n", kv.Key+":", kv.Value)
     }
     return sb.String()
 }
 ```
 
-### Port Discovery Function
+### Port Discovery: Agent-Side Responsibility
 
-A new exported function in `internal/docker/` for discovering a process's listening port:
+Port discovery is **not** performed by core code. The Vibe Kanban agent's `SummaryInfo()` implementation is responsible for discovering its own port. It reads the port file (`/tmp/vibe-kanban.port`) written by the supervisor script, retrying for up to 30 seconds. The generic `docker.ExecInContainerWithOutput` helper is used to read the file inside the container.
 
-```go
-// DiscoverListeningPort executes `ss -tlnp` inside the container and returns
-// the first port where the given process name is listening. Returns 0 if not found.
-func DiscoverListeningPort(ctx context.Context, c *Client, containerID string, processName string) (int, error) {
-    // Uses ExecInContainerWithOutput (new helper) to capture stdout
-    // Parses ss output for lines containing processName
-    // Extracts port from the Local Address:Port column
-}
-```
+See [design-agent-summary-info.md](design-agent-summary-info.md) for the full `SummaryInfo()` contract and implementation details.
 
 ---
 
@@ -449,7 +441,7 @@ func ExecInContainerWithOutput(ctx context.Context, c *Client, containerID strin
 
 ### 4. `internal/cmd/root.go`
 
-#### SessionSummary struct extension:
+#### SessionSummary struct (core-agnostic):
 
 ```go
 type SessionSummary struct {
@@ -458,11 +450,11 @@ type SessionSummary struct {
     SSHPort       int
     SSHConnect    string
     EnabledAgents []string
-    VibeKanbanURL string // empty if not discovered or not enabled
+    AgentInfo     []agent.KeyValue // populated by calling SummaryInfo on each enabled agent
 }
 ```
 
-#### FormatSessionSummary update:
+#### FormatSessionSummary (core-agnostic renderer):
 
 ```go
 func FormatSessionSummary(s SessionSummary) string {
@@ -472,62 +464,31 @@ func FormatSessionSummary(s SessionSummary) string {
     fmt.Fprintf(&sb, "SSH port:        %d\n", s.SSHPort)
     fmt.Fprintf(&sb, "SSH connect:     %s\n", s.SSHConnect)
     fmt.Fprintf(&sb, "Enabled agents:  %s\n", strings.Join(s.EnabledAgents, ", "))
-    if s.VibeKanbanURL != "" {
-        fmt.Fprintf(&sb, "Vibe Kanban:     %s\n", s.VibeKanbanURL)
+    for _, kv := range s.AgentInfo {
+        fmt.Fprintf(&sb, "%-17s%s\n", kv.Key+":", kv.Value)
     }
     return sb.String()
 }
 ```
 
-#### Port discovery in `runStart()`:
+#### Agent summary collection in `runStart()`:
 
-After the health check passes and before printing the session summary, `runStart()` checks if `vibe-kanban` is among the enabled agents. If so, it attempts port discovery:
+After health checks pass and before printing the session summary, `runStart()` calls `SummaryInfo()` on every enabled agent generically — no agent-specific branching:
 
 ```go
-// Discover Vibe Kanban port if the agent is enabled
-var vibeKanbanURL string
+// Collect agent summary info.
+var agentInfo []agent.KeyValue
 for _, a := range enabledAgents {
-    if a.ID() == constants.VibeKanbanAgentName {
-        port, err := discoverVibeKanbanPort(ctx, c, containerName)
-        if err != nil {
-            fmt.Fprintf(os.Stderr, "warning: could not discover Vibe Kanban port: %v\n", err)
-        } else if port > 0 {
-            vibeKanbanURL = fmt.Sprintf("http://localhost:%d", port)
-        }
-        break
+    kvs, err := a.SummaryInfo(ctx, c, containerName)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "warning: %s summary info: %v\n", a.ID(), err)
+        continue
     }
+    agentInfo = append(agentInfo, kvs...)
 }
 ```
 
-The `discoverVibeKanbanPort` function:
-
-```go
-// discoverVibeKanbanPort attempts to find the port Vibe Kanban is listening on
-// by executing ss inside the container. Retries for up to 30 seconds.
-func discoverVibeKanbanPort(ctx context.Context, c *dockerpkg.Client, containerID string) (int, error) {
-    deadline := time.Now().Add(30 * time.Second)
-    for time.Now().Before(deadline) {
-        exitCode, output, err := dockerpkg.ExecInContainerWithOutput(ctx, c, containerID,
-            []string{"bash", "-c", "ss -tlnp 2>/dev/null | grep vibe-kanban | awk '{print $4}' | grep -oP ':\\K[0-9]+' | head -1"})
-        if err != nil {
-            return 0, err
-        }
-        if exitCode == 0 && output != "" {
-            port := 0
-            fmt.Sscanf(strings.TrimSpace(output), "%d", &port)
-            if port > 0 {
-                return port, nil
-            }
-        }
-        select {
-        case <-ctx.Done():
-            return 0, ctx.Err()
-        case <-time.After(2 * time.Second):
-        }
-    }
-    return 0, fmt.Errorf("timed out after 30s waiting for vibe-kanban to bind a port")
-}
-```
+The core has **no** `discoverVibeKanbanPort` function and does **not** check `constants.VibeKanbanAgentName`. Port discovery is entirely the agent's responsibility inside its `SummaryInfo()` implementation.
 
 ### 5. `main.go`
 
@@ -579,21 +540,26 @@ import (
 
 ### 5. 30-second timeout for port discovery
 
-**Why:** Vibe Kanban needs time to start up (Node.js initialization, port binding). 30 seconds is generous but bounded. If it fails, the CLI prints a warning but does NOT fail the overall startup - the container is still usable for SSH and other agents.
+**Why:** Vibe Kanban needs time to start up (Node.js initialization, port binding). 30 seconds is generous but bounded. If it fails, `SummaryInfo()` returns an error, the core prints a warning, and the URL is omitted from the summary. The container is still usable for SSH and other agents.
 
 ### 6. Graceful degradation for port discovery failure
 
-**Why (VK-8.4):** If port discovery times out, the session summary simply omits the Vibe Kanban URL line. The user can still SSH into the container and discover the port manually. This prevents a flaky network or slow startup from blocking the entire workflow.
+**Why (VK-8.4):** If `SummaryInfo()` times out, the core's generic error handling prints a warning and omits that agent's key-value pairs from the session summary. The user can still SSH into the container and discover the port manually. This prevents a flaky network or slow startup from blocking the entire workflow.
 
 ### 7. `HOST=0.0.0.0` environment variable for vibe-kanban
 
 **Why:** The vibe-kanban Rust binary reads the `HOST` environment variable to determine its listen address (defaults to `127.0.0.1`). Setting `HOST=0.0.0.0` ensures the server accepts connections on all interfaces, which is required for host network mode accessibility. The `BROWSER=none` variable is also set to suppress the automatic browser-open attempt in the headless container environment.
 
-### 8. Core changes are minimal and generic
+### 8. Zero core coupling — agent-owned SummaryInfo pattern
 
-The core changes (SessionSummary field, FormatSessionSummary conditional line, port discovery) reference `constants.VibeKanbanAgentName` - they don't import the agent package. The `discoverVibeKanbanPort` function lives in `cmd/root.go` and uses only `docker.ExecInContainerWithOutput`. This maintains the "no core coupling" principle at the package level while allowing the session summary to show the URL.
+The core (`cmd/root.go`) has **no** Vibe Kanban–specific code. It does not reference `constants.VibeKanbanAgentName` for port discovery or session summary rendering. Instead:
 
-**Note on VK-6 (No Core Coupling):** VK-6.1 states the module SHALL NOT be referenced by name in core code. However, VK-8.3 requires the session summary to include the Vibe Kanban URL. These requirements are in tension. The resolution: `cmd/root.go` references `constants.VibeKanbanAgentName` (a constant, not a string literal or import path) to check if the agent is enabled. This is the same pattern used for `DefaultAgents`. The constant lives in `internal/constants/` which is shared infrastructure, not agent-specific code.
+- Every agent implements `SummaryInfo(ctx, c, containerID) ([]agent.KeyValue, error)`.
+- The core iterates all enabled agents, calls `SummaryInfo()`, and appends the returned key-value pairs to the session summary.
+- Port discovery, URL formatting, and timeout logic live entirely inside the Vibe Kanban agent's `SummaryInfo()` method.
+- The generic `docker.ExecInContainerWithOutput` helper is used by the agent to read the port file inside the container.
+
+This satisfies VK-6.1 (no core coupling) without conflicting with VK-8.3 (session summary includes the URL), because the agent itself provides the URL through the generic interface.
 
 ---
 
@@ -608,9 +574,9 @@ The core changes (SessionSummary field, FormatSessionSummary conditional line, p
 | Supervisor gives up after max restarts | Logs error to stderr, exits; container continues running (sshd is PID 1) |
 | Health check: binary not found | Returns error identifying "binary" check |
 | Health check: process not running after 5 retries | Returns error identifying "process" check with retry count |
-| Port discovery times out (30s) | Warning printed, URL omitted from summary, startup succeeds |
-| Port discovery exec fails | Warning printed, URL omitted from summary, startup succeeds |
-| `--host-network-off` (bridge mode) | Port not accessible from host; URL still shown but with a note that it requires port forwarding |
+| `SummaryInfo()` port discovery times out (30s) | Core prints warning, URL omitted from summary, startup succeeds |
+| `SummaryInfo()` exec fails | Core prints warning, URL omitted from summary, startup succeeds |
+| `--host-network-off` (bridge mode) | URL still shown; accessibility depends on Docker port mapping (outside agent scope) |
 
 ---
 
@@ -633,8 +599,8 @@ The core changes (SessionSummary field, FormatSessionSummary conditional line, p
 | `TestHasCredentials` | Returns (true, nil) |
 | `TestHealthCheckBinaryFailure` | Error message identifies binary check |
 | `TestHealthCheckProcessFailure` | Error message identifies process check |
-| `TestFormatSessionSummaryWithVibeKanban` | URL line present when VibeKanbanURL is set |
-| `TestFormatSessionSummaryWithoutVibeKanban` | URL line absent when VibeKanbanURL is empty |
+| `TestFormatSessionSummaryWithAgentInfo` | AgentInfo key-value pairs rendered when present |
+| `TestFormatSessionSummaryWithoutAgentInfo` | No extra lines when AgentInfo is empty |
 
 ### Property-Based Tests
 
@@ -676,11 +642,11 @@ See Correctness Properties section below.
 
 **Validates: Requirements VK-4.2, VK-4.3**
 
-### Property 4: Session summary includes Vibe Kanban URL for any valid port
+### Property 4: Session summary includes agent-provided key-value pairs for any valid content
 
-*For any* valid TCP port number (1-65535) set as `VibeKanbanURL` in the format `http://localhost:<port>`, `FormatSessionSummary()` SHALL include a line containing that URL. When `VibeKanbanURL` is empty, the output SHALL NOT contain "Vibe Kanban:".
+*For any* non-empty `AgentInfo` slice containing `KeyValue{Key: "Vibe Kanban", Value: "http://localhost:<port>"}` where port is a valid TCP port (1-65535), `FormatSessionSummary()` SHALL include a line containing that URL. When `AgentInfo` is empty or nil, the output SHALL NOT contain any agent-specific lines beyond the standard fields.
 
-**Validates: Requirements VK-8.3**
+**Validates: Requirements VK-8.3 (via the generic SummaryInfo pattern)**
 
 ### Property 5: Supervisor script contains correct backoff parameters
 

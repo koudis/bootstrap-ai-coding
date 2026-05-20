@@ -69,17 +69,18 @@ The supervisor script (`/usr/local/bin/vibe-kanban-supervisor.sh`) implements cr
 
 ### Port Discovery
 
-Vibe Kanban auto-assigns its port at startup (VK-9.1). The supervisor script discovers the port and writes it to a well-known file:
+Vibe Kanban auto-assigns its port at startup (VK-9.1). The supervisor script discovers the port by parsing the server's log output and writes it to a well-known file:
 
-1. The supervisor starts vibe-kanban in the background and captures its PID
-2. It polls `ss -tlnp` filtered by the exact PID (`grep "pid=$VK_PID,"`) to find the bound port
+1. The supervisor starts vibe-kanban in the background, redirecting stdout/stderr to a log file, and captures its PID
+2. It polls the log file for the "Main server on :<port>" message (up to 30 seconds)
 3. Once found, it writes the port number to `/tmp/vibe-kanban.port`
 4. `SummaryInfo()` reads this file (retrying up to 30 seconds)
 
 This approach is robust because:
-- It uses PID-based filtering (unambiguous, no process name dependency)
+- It uses the server's own log output (unambiguous, no dependency on `ss` output format)
 - It works regardless of how many other services bind ports in the container
 - It avoids conflicts when multiple containers share the host network namespace (each gets a unique auto-assigned port)
+- The port file is cleared (`rm -f`) before each restart so stale values are never read
 
 See [design-agent-summary-info.md](design-agent-summary-info.md) for the `SummaryInfo()` implementation details.
 
@@ -197,6 +198,8 @@ exec "$@"
 MAX_RESTARTS=5
 WINDOW_SECONDS=60
 DELAY_SECONDS=5
+PORT_FILE="/tmp/vibe-kanban.port"
+LOG_FILE="/tmp/vibe-kanban.log"
 RESTART_TIMES=()
 USERNAME="__USERNAME__"
 
@@ -220,8 +223,25 @@ while true; do
     # Record this restart attempt
     RESTART_TIMES+=("$(date +%s)")
 
-    # Start vibe-kanban as the container user
-    su -c "vibe-kanban" "$USERNAME" || true
+    # Clear stale port file and start vibe-kanban in background
+    rm -f "$PORT_FILE"
+    su -c "exec env BROWSER=none HOST=0.0.0.0 vibe-kanban" "$USERNAME" > "$LOG_FILE" 2>&1 &
+    VK_PID=$!
+
+    # Wait up to 30s for the port to appear in the log output
+    for i in $(seq 1 30); do
+        sleep 1
+        if [ -f "$LOG_FILE" ]; then
+            PORT=$(grep -oP 'Main server on :\K[0-9]+' "$LOG_FILE" 2>/dev/null | head -1)
+            if [ -n "$PORT" ]; then
+                echo "$PORT" > "$PORT_FILE"
+                break
+            fi
+        fi
+    done
+
+    # Wait for vibe-kanban to exit (crash or shutdown)
+    wait $VK_PID 2>/dev/null || true
 
     # Wait before restarting
     sleep "$DELAY_SECONDS"
@@ -279,6 +299,8 @@ func (a *vibeKanbanAgent) Install(b *docker.DockerfileBuilder) {
 MAX_RESTARTS=5
 WINDOW_SECONDS=60
 DELAY_SECONDS=5
+PORT_FILE="/tmp/vibe-kanban.port"
+LOG_FILE="/tmp/vibe-kanban.log"
 RESTART_TIMES=()
 while true; do
     NOW=$(date +%%s)
@@ -294,7 +316,21 @@ while true; do
         exit 1
     fi
     RESTART_TIMES+=("$(date +%%s)")
-    su -c "vibe-kanban --host 0.0.0.0" "%s" || true
+    rm -f "$PORT_FILE"
+    su -c "exec env BROWSER=none HOST=0.0.0.0 vibe-kanban" "%s" > "$LOG_FILE" 2>&1 &
+    VK_PID=$!
+    # Wait up to 30s for the port to appear in the log output
+    for i in $(seq 1 30); do
+        sleep 1
+        if [ -f "$LOG_FILE" ]; then
+            PORT=$(grep -oP 'Main server on :\K[0-9]+' "$LOG_FILE" 2>/dev/null | head -1)
+            if [ -n "$PORT" ]; then
+                echo "$PORT" > "$PORT_FILE"
+                break
+            fi
+        fi
+    done
+    wait $VK_PID 2>/dev/null || true
     sleep "$DELAY_SECONDS"
 done`, username)
 
@@ -534,9 +570,9 @@ import (
 
 **Why:** The entrypoint runs as root (Docker default). The supervisor uses `su -c "vibe-kanban" "$USERNAME"` to drop privileges. This is simpler than sudo (no sudoers parsing) and works reliably in the container environment.
 
-### 4. Port discovery via port file (not `ss` process name matching)
+### 4. Port discovery via log parsing (not `ss` process name matching)
 
-**Why:** Vibe Kanban auto-assigns its port at startup. The supervisor discovers the port using PID-based `ss` filtering and writes it to `/tmp/vibe-kanban.port`. The `SummaryInfo()` method reads this file. This is more reliable than parsing `ss` output in `SummaryInfo()` because: (a) the Rust binary name in `ss` output varies by platform/version, (b) other services may bind ports in the container, and (c) PID-based filtering in the supervisor is unambiguous since it knows the exact child PID.
+**Why:** Vibe Kanban auto-assigns its port at startup. The supervisor discovers the port by parsing the server's stdout for the "Main server on :<port>" message and writes it to `/tmp/vibe-kanban.port`. The `SummaryInfo()` method reads this file. This is more reliable than parsing `ss` output in `SummaryInfo()` because: (a) the Rust binary name in `ss` output varies by platform/version, (b) other services may bind ports in the container, and (c) log-based parsing in the supervisor is unambiguous since it captures the server's own output directly.
 
 ### 5. 30-second timeout for port discovery
 

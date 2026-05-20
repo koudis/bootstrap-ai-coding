@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
@@ -95,7 +96,12 @@ func TestCreateContainerHostNetworkMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "fake-container-id", id)
 
-	req := <-ch
+	var req createRequest
+	select {
+	case req = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for container create request")
+	}
 	require.Equal(t, container.NetworkMode("host"), req.HostConfig.NetworkMode,
 		"HostNetworkOff=false must set NetworkMode to 'host'")
 	require.Empty(t, req.HostConfig.PortBindings,
@@ -121,7 +127,12 @@ func TestCreateContainerBridgeMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "fake-container-id", id)
 
-	req := <-ch
+	var req createRequest
+	select {
+	case req = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for container create request")
+	}
 
 	// NetworkMode should NOT be "host"
 	require.NotEqual(t, container.NetworkMode("host"), req.HostConfig.NetworkMode,

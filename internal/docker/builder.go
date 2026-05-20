@@ -149,7 +149,7 @@ func NewBaseImageBuilder(info *hostinfo.Info, strategy UserStrategy, conflicting
 // info carries the runtime-resolved Container_User identity (Req 22).
 // publicKey is the content of the user's SSH public key.
 // hostKeyPriv and hostKeyPub are the persisted SSH host key pair contents.
-func NewInstanceImageBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string) *DockerfileBuilder {
+func NewInstanceImageBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKeyPub string, sshPort int, hostNetworkOff bool) *DockerfileBuilder {
 	b := &DockerfileBuilder{info: info}
 
 	// 1. FROM the shared base image
@@ -181,7 +181,11 @@ func NewInstanceImageBuilder(info *hostinfo.Info, publicKey, hostKeyPriv, hostKe
 	))
 
 	// 4. Harden sshd_config
-	b.Run("echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && echo 'PermitRootLogin no' >> /etc/ssh/sshd_config && echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config")
+	sshdConfig := "echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && echo 'PermitRootLogin no' >> /etc/ssh/sshd_config && echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config"
+	if !hostNetworkOff {
+		sshdConfig += fmt.Sprintf(" && echo 'Port %d' >> /etc/ssh/sshd_config && echo 'ListenAddress %s' >> /etc/ssh/sshd_config", sshPort, constants.HostBindIP)
+	}
+	b.Run(sshdConfig)
 
 	// 5. Ensure sshd runtime dir exists
 	b.Run("mkdir -p /run/sshd")
@@ -225,6 +229,15 @@ func (b *DockerfileBuilder) Copy(src, dst string) {
 // Cmd appends a CMD instruction using /bin/sh -c form.
 func (b *DockerfileBuilder) Cmd(cmd string) {
 	b.lines = append(b.lines, fmt.Sprintf(`CMD ["/bin/sh", "-c", %q]`, cmd))
+}
+
+// Entrypoint appends an ENTRYPOINT instruction in exec form.
+func (b *DockerfileBuilder) Entrypoint(args ...string) {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = fmt.Sprintf("%q", a)
+	}
+	b.lines = append(b.lines, fmt.Sprintf("ENTRYPOINT [%s]", strings.Join(quoted, ", ")))
 }
 
 // RunAsUser emits a USER switch, runs the command as the container user,

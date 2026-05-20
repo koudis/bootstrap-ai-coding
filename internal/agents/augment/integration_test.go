@@ -128,8 +128,7 @@ func setupSharedContainer() error {
 		Labels: map[string]string{
 			"bac.managed": "true",
 		},
-		HostUID: info.UID,
-		HostGID: info.GID,
+		HostInfo: info,
 	}
 
 	_, err = docker.BuildImage(ctx, sharedClient, baseSpec, true)
@@ -142,6 +141,7 @@ func setupSharedContainer() error {
 		info,
 		userPubKey,
 		hostKeyPriv, hostKeyPub,
+		port, false,
 	)
 	instanceBuilder.Finalize()
 
@@ -160,8 +160,7 @@ func setupSharedContainer() error {
 		Labels: map[string]string{
 			"bac.managed": "true",
 		},
-		HostUID: info.UID,
-		HostGID: info.GID,
+		HostInfo: info,
 	}
 
 	_, err = docker.BuildImage(ctx, sharedClient, spec, true)

@@ -5,6 +5,7 @@
 package augment_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -277,6 +278,22 @@ func TestAugmentHasCredentialsEmptyFile(t *testing.T) {
 	hasCreds, err := a.HasCredentials(tmpDir)
 	require.NoError(t, err)
 	require.False(t, hasCreds, "empty file should not count as credentials")
+}
+
+// ---------------------------------------------------------------------------
+// SummaryInfo no-op test
+// ---------------------------------------------------------------------------
+
+// TestSummaryInfoReturnsNil verifies that the Augment Code agent's SummaryInfo
+// method returns (nil, nil) since it has no additional session summary info.
+// Validates: SI-6.2
+func TestSummaryInfoReturnsNil(t *testing.T) {
+	a, err := agent.Lookup(constants.AugmentCodeAgentName)
+	require.NoError(t, err, "augment agent must be registered")
+
+	info, err := a.SummaryInfo(context.Background(), nil, "")
+	require.NoError(t, err)
+	require.Nil(t, info)
 }
 
 // ---------------------------------------------------------------------------

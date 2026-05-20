@@ -120,6 +120,33 @@ func (d *DataDir) WriteManifest(agentIDs []string) error {
 	return nil
 }
 
+// WriteHostNetworkOff persists the hostNetworkOff boolean as "true" or "false"
+// in a file named host_network_off with constants.ToolDataFilePerm.
+func (d *DataDir) WriteHostNetworkOff(off bool) error {
+	p := filepath.Join(d.path, "host_network_off")
+	if err := os.WriteFile(p, []byte(strconv.FormatBool(off)), constants.ToolDataFilePerm); err != nil {
+		return fmt.Errorf("writing host_network_off file: %w", err)
+	}
+	return nil
+}
+
+// ReadHostNetworkOff reads the persisted hostNetworkOff value.
+// Returns (false, nil) if the file does not exist (default: host network ON).
+func (d *DataDir) ReadHostNetworkOff() (bool, error) {
+	data, err := os.ReadFile(filepath.Join(d.path, "host_network_off"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading host_network_off file: %w", err)
+	}
+	val, err := strconv.ParseBool(strings.TrimSpace(string(data)))
+	if err != nil {
+		return false, fmt.Errorf("parsing host_network_off file: %w", err)
+	}
+	return val, nil
+}
+
 // PurgeRoot removes the entire Tool_Data_Dir root and all its contents.
 func PurgeRoot() error {
 	return os.RemoveAll(pathutil.ExpandHome(constants.ToolDataDirRoot))

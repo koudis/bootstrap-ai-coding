@@ -1,6 +1,7 @@
 package buildresources_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -96,6 +97,17 @@ func TestInstallAppendsExpectedPackages(t *testing.T) {
 		"Install() must install uv via official installer")
 	require.Contains(t, content, "UV_INSTALL_DIR=/usr/local/bin",
 		"Install() must install uv to /usr/local/bin")
+}
+
+// TestSummaryInfoReturnsNil verifies that the Build Resources agent's SummaryInfo
+// method returns (nil, nil) since it has no additional session summary info.
+// Validates: SI-6.3
+func TestSummaryInfoReturnsNil(t *testing.T) {
+	a := getAgent(t)
+
+	info, err := a.SummaryInfo(context.Background(), nil, "")
+	require.NoError(t, err)
+	require.Nil(t, info)
 }
 
 func TestInstallUsesSystemWidePaths(t *testing.T) {

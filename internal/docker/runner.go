@@ -18,9 +18,11 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
+	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
 )
 
 // Mount represents a single Docker bind mount.
@@ -32,16 +34,16 @@ type Mount struct {
 
 // ContainerSpec is the fully resolved specification for a container.
 type ContainerSpec struct {
-	Name          string            // Deterministic container name (bac-<12hex>)
-	ImageTag      string            // Docker image tag (derived from container name)
-	Dockerfile    string            // Complete Dockerfile content (assembled by DockerfileBuilder)
-	Mounts        []Mount           // All bind mounts: /workspace + per-agent credential stores
-	SSHPort       int               // Host-side TCP port mapped to container port 22
-	Labels        map[string]string // Docker labels for identification
-	HostUID       int               // Host user UID (passed as build arg for dev user)
-	HostGID       int               // Host user GID (passed as build arg for dev user)
-	NoCache       bool              // When true, disable Docker layer cache during image build
-	RestartPolicy string            // Docker restart policy (e.g. "unless-stopped"); empty means use default
+	Name           string            // Deterministic container name (bac-<12hex>)
+	ImageTag       string            // Docker image tag (derived from container name)
+	Dockerfile     string            // Complete Dockerfile content (assembled by DockerfileBuilder)
+	Mounts         []Mount           // All bind mounts: /workspace + per-agent credential stores
+	SSHPort        int               // SSH port (used in sshd_config for host mode, or Docker port mapping for bridge mode)
+	Labels         map[string]string // Docker labels for identification
+	HostInfo       *hostinfo.Info    // Req 22: runtime-resolved host user identity (UID, GID, Username, HomeDir)
+	NoCache        bool              // When true, disable Docker layer cache during image build
+	HostNetworkOff bool              // Req 26: when true, use bridge mode; when false (default), use host network
+	RestartPolicy  string            // Docker restart policy (e.g. "unless-stopped"); empty means use default
 }
 
 func buildContextFromDockerfile(dockerfile string) (io.Reader, error) {
@@ -162,14 +164,6 @@ func ResolveRestartPolicy(spec ContainerSpec) string {
 
 // CreateContainer creates a container from the given spec.
 func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string, error) {
-	sshPort := nat.Port(fmt.Sprintf("%d/tcp", constants.ContainerSSHPort))
-	portBindings := nat.PortMap{
-		sshPort: []nat.PortBinding{
-			{HostIP: constants.HostBindIP, HostPort: fmt.Sprintf("%d", spec.SSHPort)},
-		},
-	}
-	exposedPorts := nat.PortSet{sshPort: struct{}{}}
-
 	var mounts []mount.Mount
 	for _, m := range spec.Mounts {
 		mounts = append(mounts, mount.Mount{
@@ -182,19 +176,37 @@ func CreateContainer(ctx context.Context, c *Client, spec ContainerSpec) (string
 
 	restartPolicy := ResolveRestartPolicy(spec)
 
+	containerCfg := &container.Config{
+		Image:    spec.ImageTag,
+		Hostname: spec.Name,
+		Labels:   spec.Labels,
+	}
+
+	hostCfg := &container.HostConfig{
+		Mounts:        mounts,
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restartPolicy)},
+	}
+
+	if !spec.HostNetworkOff {
+		// Host network mode (default): share the host's network namespace.
+		// Do NOT set PortBindings or ExposedPorts — they are ignored in host
+		// network mode and would produce a Docker warning.
+		hostCfg.NetworkMode = container.NetworkMode("host")
+	} else {
+		// Bridge mode: map container SSH port to host port.
+		sshPort := nat.Port(fmt.Sprintf("%d/tcp", constants.ContainerSSHPort))
+		hostCfg.PortBindings = nat.PortMap{
+			sshPort: []nat.PortBinding{
+				{HostIP: constants.HostBindIP, HostPort: fmt.Sprintf("%d", spec.SSHPort)},
+			},
+		}
+		containerCfg.ExposedPorts = nat.PortSet{sshPort: struct{}{}}
+	}
+
 	resp, err := c.ContainerCreate(
 		ctx,
-		&container.Config{
-			Image:        spec.ImageTag,
-			Hostname:     spec.Name,
-			Labels:       spec.Labels,
-			ExposedPorts: exposedPorts,
-		},
-		&container.HostConfig{
-			PortBindings:  portBindings,
-			Mounts:        mounts,
-			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(restartPolicy)},
-		},
+		containerCfg,
+		hostCfg,
 		nil,
 		nil,
 		spec.Name,
@@ -364,4 +376,36 @@ func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []s
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// ExecInContainerWithOutput runs a command inside a running container and returns
+// the exit code and captured stdout. Stderr is discarded. This is useful when the
+// caller needs to parse command output (e.g. port discovery via `ss -tlnp`).
+func ExecInContainerWithOutput(ctx context.Context, c *Client, containerID string, cmd []string) (exitCode int, stdout string, err error) {
+	execID, err := c.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return -1, "", fmt.Errorf("creating exec in container %s: %w", containerID, err)
+	}
+
+	resp, err := c.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return -1, "", fmt.Errorf("attaching to exec in container %s: %w", containerID, err)
+	}
+	defer resp.Close()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader); err != nil {
+		return -1, "", fmt.Errorf("reading exec output in container %s: %w", containerID, err)
+	}
+
+	inspect, err := c.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return -1, "", fmt.Errorf("inspecting exec in container %s: %w", containerID, err)
+	}
+
+	return inspect.ExitCode, stdoutBuf.String(), nil
 }

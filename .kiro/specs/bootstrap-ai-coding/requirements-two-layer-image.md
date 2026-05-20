@@ -48,9 +48,9 @@ This feature splits the current monolithic Container_Image build (core Req 14) i
 1. WHEN an Instance_Image build is needed (no existing image, base was rebuilt, or `--rebuild`), THE Builder SHALL produce a Dockerfile starting with `FROM bac-base:latest`.
 2. THE Instance_Image SHALL inject the project's persisted SSH host key pair (core Req 13) into `/etc/ssh/ssh_host_ed25519_key` (`0600`) and `.pub` (`0644`).
 3. THE Instance_Image SHALL inject Public_Key (core Req 4) into `<Container_User_Home>/.ssh/authorized_keys` (`0600`), directory at `0700`, owned by Container_User.
-4. THE Instance_Image SHALL append sshd_config: `PasswordAuthentication no`, `PermitRootLogin no`, `PubkeyAuthentication yes`.
+4. THE Instance_Image SHALL append sshd_config directives: `PasswordAuthentication no`, `PermitRootLogin no`, `PubkeyAuthentication yes`. WHEN host network mode is active (default, `--host-network-off` NOT set), THE Instance_Image SHALL additionally append `Port <SSH_Port>` and `ListenAddress 127.0.0.1` to configure sshd to listen on the project's SSH_Port bound to localhost only. WHEN bridge mode is active (`--host-network-off` IS set), these port/address directives SHALL be omitted (sshd uses its default port 22).
 5. THE Instance_Image SHALL create `/run/sshd`.
-6. THE Instance_Image SHALL set `CMD ["/usr/sbin/sshd", "-D"]` as the final instruction.
+6. THE Instance_Image SHALL set `CMD ["/usr/sbin/sshd", "-D"]` as the final instruction. sshd reads the port and bind address from sshd_config; no `-p` flag is needed in CMD.
 7. THE Instance_Image SHALL be tagged `<Container_Name>:latest`.
 8. THE Instance_Image SHALL carry labels `bac.managed` = `"true"` and `bac.container` = Container_Name.
 
@@ -121,6 +121,7 @@ This feature splits the current monolithic Container_Image build (core Req 14) i
 2. IF confirmed: stop/remove all bac-managed containers, remove all bac-managed images (Base_Image + all Instance_Images), delete Tool_Data_Dir root, remove all Known_Hosts_Entries, remove all SSH_Config_Entries.
 3. IF not confirmed, print "Purge cancelled." and exit 0.
 4. IF removal of an individual item fails, print warning to stderr and continue.
+5. Image removal SHALL proceed in dependency order: Instance_Images (children, identified by `bac.container` label) SHALL be removed before Base_Image (parent). This prevents Docker's "image has dependent child images" error.
 
 ### Requirement TL-8: Agent Manifest Change Detection
 

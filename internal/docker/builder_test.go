@@ -62,6 +62,7 @@ func newInstanceBuilder(uid, gid int) *docker.DockerfileBuilder {
 		testInfo(uid, gid),
 		fixedPublicKey,
 		fixedHostKeyPriv, fixedHostKeyPub,
+		2222, false,
 	)
 }
 
@@ -402,6 +403,7 @@ func TestPropertyPublicKeyInjected_Create(t *testing.T) {
 			testInfo(uid, gid),
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
+			2222, false,
 		)
 		content := b.Build()
 
@@ -423,6 +425,7 @@ func TestPropertyPublicKeyInjected_Rename(t *testing.T) {
 			testInfo(uid, gid),
 			publicKey,
 			fixedHostKeyPriv, fixedHostKeyPub,
+			2222, false,
 		)
 		content := b.Build()
 
@@ -450,6 +453,7 @@ func TestPropertySSHHostKeyInjected_Create(t *testing.T) {
 			testInfo(uid, gid),
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
+			2222, false,
 		)
 		content := b.Build()
 
@@ -477,6 +481,7 @@ func TestPropertySSHHostKeyInjected_Rename(t *testing.T) {
 			testInfo(uid, gid),
 			fixedPublicKey,
 			hostKeyPriv, hostKeyPub,
+			2222, false,
 		)
 		content := b.Build()
 
@@ -878,7 +883,7 @@ func TestPropertyDockerfileSSHAndUserForAnyUsername(t *testing.T) {
 			"Base Dockerfile must contain sudoers entry for username %q with NOPASSWD", username)
 
 		// Assert: sshd CMD is in the instance layer
-		ib := docker.NewInstanceImageBuilder(info, fixedPublicKey, fixedHostKeyPriv, fixedHostKeyPub)
+		ib := docker.NewInstanceImageBuilder(info, fixedPublicKey, fixedHostKeyPriv, fixedHostKeyPub, 2222, false)
 		ib.Finalize()
 		instanceContent := ib.Build()
 		require.Contains(t, instanceContent, `CMD ["/usr/sbin/sshd", "-D"]`,
@@ -930,7 +935,7 @@ func TestPropertyDockerfileUsesRuntimeUsernameAndHomeDir(t *testing.T) {
 			"sudoers must reference the drawn username %q", username)
 
 		// Build an instance image Dockerfile
-		instanceBuilder := docker.NewInstanceImageBuilder(info, fixedPublicKey, fixedHostKeyPriv, fixedHostKeyPub)
+		instanceBuilder := docker.NewInstanceImageBuilder(info, fixedPublicKey, fixedHostKeyPriv, fixedHostKeyPub, 2222, false)
 		instanceContent := instanceBuilder.Build()
 
 		// Assert the instance Dockerfile contains the drawn username in chown
@@ -1322,7 +1327,7 @@ func TestPropertyTwoLayer_InstanceImageStartsWithFROM(t *testing.T) {
 			GID:      gid,
 		}
 
-		b := docker.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		b := docker.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub, 2222, false)
 		lines := b.Lines()
 
 		wantFrom := "FROM " + constants.BaseImageName + ":latest"
@@ -1404,7 +1409,7 @@ func TestPropertyTwoLayer_InstanceImageEndsWithCMDAfterFinalize(t *testing.T) {
 			GID:      gid,
 		}
 
-		b := docker.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub)
+		b := docker.NewInstanceImageBuilder(info, publicKey, hostKeyPriv, hostKeyPub, 2222, false)
 		b.Finalize()
 		lines := b.Lines()
 
@@ -1457,4 +1462,58 @@ func TestRunAsUserUsesInfoUsername(t *testing.T) {
 		"RunAsUser must use the username from hostinfo.Info")
 	require.Equal(t, "USER root", lines[linesBefore+2],
 		"RunAsUser must switch back to root")
+}
+
+// ---------------------------------------------------------------------------
+// Property 57: --host-network-off controls network mode and sshd_config
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 57: --host-network-off controls network mode and sshd_config
+func TestInstanceImageSSHDConfigHostNetwork(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		port := rapid.IntRange(1024, 65535).Draw(t, "port")
+		hostNetworkOff := rapid.Bool().Draw(t, "hostNetworkOff")
+
+		// Build instance image with drawn port and hostNetworkOff values
+		b := docker.NewInstanceImageBuilder(
+			testInfo(1000, 1000),
+			fixedPublicKey,
+			fixedHostKeyPriv, fixedHostKeyPub,
+			port, hostNetworkOff,
+		)
+		content := b.Build()
+
+		if !hostNetworkOff {
+			// When host network is used, sshd_config must contain Port and ListenAddress
+			require.Contains(t, content, fmt.Sprintf("Port %d", port),
+				"when !hostNetworkOff, sshd_config must contain Port %d", port)
+			require.Contains(t, content, "ListenAddress 127.0.0.1",
+				"when !hostNetworkOff, sshd_config must contain ListenAddress 127.0.0.1")
+		} else {
+			// When host network is off, sshd_config must NOT contain Port or ListenAddress directives
+			require.NotContains(t, content, "Port ",
+				"when hostNetworkOff, sshd_config must NOT contain Port directive")
+			require.NotContains(t, content, "ListenAddress",
+				"when hostNetworkOff, sshd_config must NOT contain ListenAddress directive")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for Entrypoint builder method
+// Validates: VK-3.1
+// ---------------------------------------------------------------------------
+
+func TestBuilderEntrypointSingleArg(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	b.Entrypoint("/usr/local/bin/bac-entrypoint.sh")
+	content := b.Build()
+	require.Contains(t, content, `ENTRYPOINT ["/usr/local/bin/bac-entrypoint.sh"]`)
+}
+
+func TestBuilderEntrypointMultiArg(t *testing.T) {
+	b := newCreateBuilder(1000, 1000)
+	b.Entrypoint("/bin/sh", "-c", "start.sh")
+	content := b.Build()
+	require.Contains(t, content, `ENTRYPOINT ["/bin/sh", "-c", "start.sh"]`)
 }

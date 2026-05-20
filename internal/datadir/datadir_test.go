@@ -285,6 +285,66 @@ func TestReadManifestCorruptJSON(t *testing.T) {
 	require.Error(t, err, "ReadManifest must error on invalid JSON")
 }
 
+// TestHostNetworkOffRoundTrip verifies that WriteHostNetworkOff followed by
+// ReadHostNetworkOff returns the same boolean value.
+func TestHostNetworkOffRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dd, err := datadir.New("test-container")
+	require.NoError(t, err)
+
+	// Not yet written — should return false, nil (default: host network ON).
+	got, err := dd.ReadHostNetworkOff()
+	require.NoError(t, err)
+	require.False(t, got)
+
+	// Write true and read back.
+	require.NoError(t, dd.WriteHostNetworkOff(true))
+	got, err = dd.ReadHostNetworkOff()
+	require.NoError(t, err)
+	require.True(t, got)
+
+	// Write false and read back.
+	require.NoError(t, dd.WriteHostNetworkOff(false))
+	got, err = dd.ReadHostNetworkOff()
+	require.NoError(t, err)
+	require.False(t, got)
+}
+
+// TestWriteHostNetworkOffFilePermission asserts that WriteHostNetworkOff writes
+// the file with constants.ToolDataFilePerm.
+func TestWriteHostNetworkOffFilePermission(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits not applicable on Windows")
+	}
+
+	t.Setenv("HOME", t.TempDir())
+
+	dd, err := datadir.New("test-container")
+	require.NoError(t, err)
+
+	require.NoError(t, dd.WriteHostNetworkOff(true))
+
+	info, err := os.Stat(filepath.Join(dd.Path(), "host_network_off"))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(constants.ToolDataFilePerm), info.Mode().Perm(),
+		"host_network_off file has mode %04o, want %04o", info.Mode().Perm(), constants.ToolDataFilePerm)
+}
+
+// TestReadHostNetworkOffCorruptContent verifies that ReadHostNetworkOff returns
+// an error when the file contains non-boolean content.
+func TestReadHostNetworkOffCorruptContent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dd, err := datadir.New("test-container")
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dd.Path(), "host_network_off"), []byte("not-a-bool"), constants.ToolDataFilePerm))
+
+	_, err = dd.ReadHostNetworkOff()
+	require.Error(t, err, "ReadHostNetworkOff must error on non-boolean content")
+}
+
 // TestExpandHomeNoTilde verifies that expandHome (via New) handles paths
 // without a tilde prefix correctly. We exercise this indirectly by setting
 // HOME to an absolute path and confirming New succeeds.

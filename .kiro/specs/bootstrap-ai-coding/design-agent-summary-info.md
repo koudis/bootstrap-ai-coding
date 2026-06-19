@@ -4,19 +4,17 @@
 > - [design.md](design.md) — Overview and document index
 > - [requirements-agent-summary-info.md](requirements-agent-summary-info.md) — Requirements (SI-1 through SI-7)
 > - [design-components.md](design-components.md) — Core component designs (Agent Interface, SessionSummary)
-> - [design-vibekanban.md](design-vibekanban.md) — Vibe Kanban agent module design
 
 ---
 
 ## Overview
 
-This design describes the Agent Summary Info mechanism — an extension to the `Agent` interface that allows agent modules to contribute key:value pairs to the session summary printed after a successful container start. The primary motivation is to remove all Vibe Kanban–specific logic from the core (`internal/cmd/root.go`), restoring the architectural rule that "core has zero knowledge of agents."
+This design describes the Agent Summary Info mechanism — an extension to the `Agent` interface that allows agent modules to contribute key:value pairs to the session summary printed after a successful container start. The mechanism enforces the architectural rule that "core has zero knowledge of agents."
 
-The refactoring:
+The design:
 1. Adds a `KeyValue` struct and `SummaryInfo` method to the `Agent` interface
-2. Moves port discovery logic from `root.go` into the `vibekanban` package
-3. Makes the core iterate generically over agents to collect summary info
-4. Removes all agent-specific references from `root.go`
+2. Makes the core iterate generically over agents to collect summary info
+3. Removes all agent-specific references from `root.go`
 
 ---
 
@@ -26,21 +24,21 @@ The refactoring:
 sequenceDiagram
     participant Core as cmd/root.go
     participant Agent1 as Agent (claude)
-    participant Agent2 as Agent (vibekanban)
+    participant Agent2 as Agent (example)
     participant Docker as Docker Client
 
     Note over Core: Container started successfully
     Core->>Agent1: SummaryInfo(ctx, client, containerID)
     Agent1-->>Core: (nil, nil)
     Core->>Agent2: SummaryInfo(ctx, client, containerID)
-    Agent2->>Docker: ExecInContainerWithOutput(cat /tmp/vibe-kanban.port)
-    Docker-->>Agent2: "39497"
-    Agent2-->>Core: ([]KeyValue{{Key:"Vibe Kanban", Value:"http://localhost:39497"}}, nil)
+    Agent2->>Docker: ExecInContainerWithOutput(...)
+    Docker-->>Agent2: "8080"
+    Agent2-->>Core: ([]KeyValue{{Key:"My Agent", Value:"http://localhost:8080"}}, nil)
     Note over Core: Collect all KeyValue pairs
     Note over Core: FormatSessionSummary with AgentInfo
 ```
 
-The core treats all agents uniformly — it never inspects the returned keys or values, never branches on agent IDs, and never references `constants.VibeKanbanAgentName`.
+The core treats all agents uniformly — it never inspects the returned keys or values, never branches on agent IDs, and never references any agent-specific constant.
 
 ---
 
@@ -90,11 +88,9 @@ type SessionSummary struct {
     SSHPort       int
     SSHConnect    string
     EnabledAgents []string
-    AgentInfo     []agent.KeyValue // replaces VibeKanbanURL
+    AgentInfo     []agent.KeyValue // generic agent info pairs
 }
 ```
-
-The `VibeKanbanURL string` field is removed entirely.
 
 ### Updated FormatSessionSummary
 
@@ -116,7 +112,7 @@ func FormatSessionSummary(s SessionSummary) string {
 **Design decisions:**
 - The format string `"%-17s%s\n"` left-pads the key (with colon) to 17 characters, aligning values with the existing fields (`"Data directory:  "` is 17 chars including the trailing spaces).
 - No conditional logic — the loop handles zero, one, or many entries uniformly.
-- When `AgentInfo` is nil or empty, the loop body never executes, producing output identical to the current format (minus the removed Vibe Kanban line).
+- When `AgentInfo` is nil or empty, the loop body never executes, producing output identical to the standard five-field format.
 
 ---
 
@@ -159,56 +155,7 @@ func printSessionSummary(dd *datadir.DataDir, projectDir string, containerName s
 }
 ```
 
-The `vibeKanbanURL string` parameter is removed and replaced by the generic `agentInfo []agent.KeyValue`.
-
----
-
-## Vibe Kanban SummaryInfo Implementation
-
-The port discovery uses a **port file** approach for robustness. The supervisor script starts vibe-kanban in the background, discovers its auto-assigned port by polling `ss -tlnp` filtered by the exact PID, and writes the port to `/tmp/vibe-kanban.port`. The `SummaryInfo()` method simply reads this file.
-
-This design is robust because:
-- It doesn't depend on process names in `ss` output (which vary by platform/version)
-- It doesn't break when other services bind ports in the container
-- It uses PID-based filtering in the supervisor, which is unambiguous
-
-```go
-// vibeKanbanPortFile is the well-known path where the supervisor writes
-// the auto-assigned port after vibe-kanban starts.
-const vibeKanbanPortFile = "/tmp/vibe-kanban.port"
-
-// SummaryInfo reads the port file written by the supervisor script.
-// Retries for up to 30 seconds with 2-second intervals.
-func (a *vibeKanbanAgent) SummaryInfo(ctx context.Context, c *docker.Client, containerID string) ([]agent.KeyValue, error) {
-    deadline := time.Now().Add(30 * time.Second)
-    for time.Now().Before(deadline) {
-        exitCode, output, err := docker.ExecInContainerWithOutput(ctx, c, containerID,
-            []string{"cat", vibeKanbanPortFile})
-        if err != nil {
-            return nil, err
-        }
-        if exitCode == 0 {
-            portStr := strings.TrimSpace(output)
-            port, err := strconv.Atoi(portStr)
-            if err == nil && port > 0 && port <= 65535 {
-                return []agent.KeyValue{
-                    {Key: "Vibe Kanban", Value: fmt.Sprintf("http://localhost:%d", port)},
-                }, nil
-            }
-        }
-        select {
-        case <-ctx.Done():
-            return nil, ctx.Err()
-        case <-time.After(2 * time.Second):
-        }
-    }
-    return nil, fmt.Errorf("timed out after 30s waiting for vibe-kanban port file")
-}
-```
-
-**New imports in `vibekanban.go`:** `"strconv"`.
-
-**Removed from `vibekanban.go`:** `"regexp"` (no longer needed — port file contains a plain integer).
+The previous agent-specific URL parameter is removed and replaced by the generic `agentInfo []agent.KeyValue`.
 
 ---
 
@@ -237,31 +184,14 @@ func (a *buildResourcesAgent) SummaryInfo(ctx context.Context, c *docker.Client,
 
 ---
 
-## What Gets Removed from root.go
-
-The following items are deleted from `internal/cmd/root.go`:
-
-| Item | Type | Reason |
-|---|---|---|
-| `VibeKanbanURL string` | Field on `SessionSummary` | Replaced by `AgentInfo []agent.KeyValue` |
-| `discoverVibeKanbanPort()` | Function | Moved to `vibekanban.SummaryInfo()` |
-| `portRegexp` | Package-level `var` | Moved to `vibekanban` package |
-| `constants.VibeKanbanAgentName` reference | Import usage | Core no longer references any agent by name |
-| Vibe Kanban URL conditional in `FormatSessionSummary` | `if` block | Replaced by generic `AgentInfo` loop |
-| Vibe Kanban discovery blocks in `runStart` | Two code blocks (reconnect path + fresh start path) | Replaced by generic collection loop |
-
-After this refactoring, `root.go` no longer imports or references any agent-specific constant. The `"regexp"` and `"strconv"` imports can also be removed from `root.go` (they were only used by `discoverVibeKanbanPort`).
-
----
-
 ## Data Models
 
 ### KeyValue (new)
 
 | Field | Type | Description |
 |---|---|---|
-| `Key` | `string` | Label for the summary line (e.g. `"Vibe Kanban"`) |
-| `Value` | `string` | Content for the summary line (e.g. `"http://localhost:3000"`) |
+| `Key` | `string` | Label for the summary line (e.g. `"My Agent"`) |
+| `Value` | `string` | Content for the summary line (e.g. `"http://localhost:8080"`) |
 
 ### SessionSummary (updated)
 
@@ -272,7 +202,6 @@ After this refactoring, `root.go` no longer imports or references any agent-spec
 | `SSHPort` | `int` | unchanged |
 | `SSHConnect` | `string` | unchanged |
 | `EnabledAgents` | `[]string` | unchanged |
-| `VibeKanbanURL` | `string` | **removed** |
 | `AgentInfo` | `[]agent.KeyValue` | **added** |
 
 ---
@@ -293,12 +222,6 @@ After this refactoring, `root.go` no longer imports or references any agent-spec
 
 **Validates: Requirements SI-2.3, SI-2.4, SI-7.2, SI-7.3, SI-7.4**
 
-### Property 3: Vibe Kanban URL format
-
-*For any* valid TCP port number (1–65535), the Vibe Kanban `SummaryInfo` URL value SHALL be exactly `"http://localhost:<port>"` where `<port>` is the decimal string representation of the port number.
-
-**Validates: Requirements SI-5.2**
-
 ---
 
 ## Error Handling
@@ -309,7 +232,7 @@ After this refactoring, `root.go` no longer imports or references any agent-spec
 | Agent's `SummaryInfo()` returns `(nil, nil)` | No lines added. No warning. |
 | Agent's `SummaryInfo()` returns `([]KeyValue{}, nil)` | Same as nil — no lines added. |
 | Context cancelled during `SummaryInfo()` | Agent returns `ctx.Err()`. Core prints warning, continues with remaining agents. |
-| Vibe Kanban port discovery times out (30s) | Returns error. Core prints warning. Session summary omits Vibe Kanban URL. Startup succeeds. |
+| Agent port/resource discovery times out | Returns error. Core prints warning. Session summary omits that agent's info. Startup succeeds. |
 
 ---
 
@@ -321,7 +244,6 @@ After this refactoring, `root.go` no longer imports or references any agent-spec
 |---|---|---|
 | Property 1: Collection order | Random slices of `([]KeyValue, error)` tuples | Collected output matches expected filtered/ordered result |
 | Property 2: Formatting | Random `SessionSummary` with random `AgentInfo` | All keys/values present, after "Enabled agents", no extras when empty |
-| Property 3: URL format | Random port in 1–65535 | URL matches `"http://localhost:<port>"` exactly |
 
 Each property test runs minimum 100 iterations. Tag format:
 ```go
@@ -343,8 +265,8 @@ Each property test runs minimum 100 iterations. Tag format:
 
 | Test | What it verifies |
 |---|---|
-| `TestVibeKanbanSummaryInfoDiscoversPort` | With a running container, `SummaryInfo()` returns the correct URL |
-| `TestSessionSummaryContainsVibeKanbanURL` | Full start flow prints Vibe Kanban URL via the generic mechanism |
+| `TestAgentSummaryInfoDiscoversInfo` | With a running container, `SummaryInfo()` returns the correct info |
+| `TestSessionSummaryContainsAgentInfo` | Full start flow prints agent info via the generic mechanism |
 
 ### What is NOT tested with PBT
 

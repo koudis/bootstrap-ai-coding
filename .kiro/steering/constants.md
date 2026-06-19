@@ -31,7 +31,6 @@ This means:
 | `ClaudeCodeAgentName` | `"claude-code"` | Agent_ID for Claude Code (CC-1) |
 | `AugmentCodeAgentName` | `"augment-code"` | Agent_ID for Augment Code (AC-1) |
 | `BuildResourcesAgentName` | `"build-resources"` | Agent_ID for Build Resources (BR-1) |
-| `VibeKanbanAgentName` | `"vibe-kanban"` | Agent_ID for Vibe Kanban (VK-1) |
 | `DefaultAgents` | `"claude-code,augment-code,build-resources"` | default `Enabled_Agents` (Req 7.5) |
 | `SSHHostKeyType` | `"ed25519"` | SSH host key algorithm |
 | `MinDockerVersion` | `"20.10"` | minimum Docker version (Req 6.3) |

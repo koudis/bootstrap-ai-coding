@@ -187,27 +187,25 @@ func TestFormatSessionSummaryValues(t *testing.T) {
 	require.Contains(t, output, "aider")
 }
 
-// TestFormatSessionSummaryWithVibeKanban verifies that the "Vibe Kanban:" line
-// is present in the output when AgentInfo contains a Vibe Kanban entry.
-// Validates: VK-8.3, VK-8.4
-func TestFormatSessionSummaryWithVibeKanban(t *testing.T) {
+// TestFormatSessionSummaryWithAgentInfo verifies that the agent info line
+// is present in the output when AgentInfo contains an entry.
+func TestFormatSessionSummaryWithAgentInfo(t *testing.T) {
 	summary := cmd.SessionSummary{
 		DataDir:       "/home/user/.config/bootstrap-ai-coding/bac-myproject",
 		ProjectDir:    "/home/user/myproject",
 		SSHPort:       2222,
 		SSHConnect:    "ssh bac-myproject",
-		EnabledAgents: []string{"claude-code", "vibe-kanban"},
-		AgentInfo:     []agent.KeyValue{{Key: "Vibe Kanban", Value: "http://localhost:3000"}},
+		EnabledAgents: []string{"claude-code"},
+		AgentInfo:     []agent.KeyValue{{Key: "My Agent", Value: "http://localhost:8080"}},
 	}
 	output := cmd.FormatSessionSummary(summary)
-	require.Contains(t, output, "Vibe Kanban:")
-	require.Contains(t, output, "http://localhost:3000")
+	require.Contains(t, output, "My Agent:")
+	require.Contains(t, output, "http://localhost:8080")
 }
 
-// TestFormatSessionSummaryWithoutVibeKanban verifies that the "Vibe Kanban:" line
+// TestFormatSessionSummaryWithoutAgentInfo verifies that the "My Agent:" line
 // is absent from the output when AgentInfo is empty.
-// Validates: VK-8.3, VK-8.4
-func TestFormatSessionSummaryWithoutVibeKanban(t *testing.T) {
+func TestFormatSessionSummaryWithoutAgentInfo(t *testing.T) {
 	summary := cmd.SessionSummary{
 		DataDir:       "/home/user/.config/bootstrap-ai-coding/bac-myproject",
 		ProjectDir:    "/home/user/myproject",
@@ -217,7 +215,7 @@ func TestFormatSessionSummaryWithoutVibeKanban(t *testing.T) {
 		AgentInfo:     nil,
 	}
 	output := cmd.FormatSessionSummary(summary)
-	require.NotContains(t, output, "Vibe Kanban:")
+	require.NotContains(t, output, "My Agent:")
 }
 
 // Feature: bootstrap-ai-coding, Property 35: --port is always within 1024–65535 when provided
@@ -598,8 +596,8 @@ func TestPropertyCollectionPreservesOrderAndExcludesErrors(t *testing.T) {
 	})
 }
 
-// Feature: bootstrap-ai-coding, Property 4: Session summary includes Vibe Kanban URL for any valid port
-func TestPropertySessionSummaryIncludesVibeKanbanURL(t *testing.T) {
+// Feature: bootstrap-ai-coding, Property 4: Session summary includes agent info URL for any valid port
+func TestPropertySessionSummaryIncludesAgentInfoURL(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		port := rapid.IntRange(1, 65535).Draw(t, "port")
 		url := fmt.Sprintf("http://localhost:%d", port)
@@ -609,19 +607,19 @@ func TestPropertySessionSummaryIncludesVibeKanbanURL(t *testing.T) {
 			ProjectDir:    "/home/user/project",
 			SSHPort:       2222,
 			SSHConnect:    "ssh bac-test",
-			EnabledAgents: []string{"vibe-kanban"},
-			AgentInfo:     []agent.KeyValue{{Key: "Vibe Kanban", Value: url}},
+			EnabledAgents: []string{"claude-code"},
+			AgentInfo:     []agent.KeyValue{{Key: "My Agent", Value: url}},
 		}
 
 		output := cmd.FormatSessionSummary(summary)
 
-		// When AgentInfo contains Vibe Kanban, output must contain "Vibe Kanban:" and the URL.
-		require.Contains(t, output, "Vibe Kanban:",
-			"output must contain 'Vibe Kanban:' label when AgentInfo is set")
+		// When AgentInfo contains My Agent, output must contain "My Agent:" and the URL.
+		require.Contains(t, output, "My Agent:",
+			"output must contain 'My Agent:' label when AgentInfo is set")
 		require.Contains(t, output, url,
-			"output must contain the Vibe Kanban URL %q", url)
+			"output must contain the agent info URL %q", url)
 
-		// When AgentInfo is empty, output must NOT contain "Vibe Kanban:".
+		// When AgentInfo is empty, output must NOT contain "My Agent:".
 		summaryEmpty := cmd.SessionSummary{
 			DataDir:       "/home/user/.config/bootstrap-ai-coding/bac-test",
 			ProjectDir:    "/home/user/project",
@@ -632,7 +630,7 @@ func TestPropertySessionSummaryIncludesVibeKanbanURL(t *testing.T) {
 		}
 
 		outputEmpty := cmd.FormatSessionSummary(summaryEmpty)
-		require.NotContains(t, outputEmpty, "Vibe Kanban:",
-			"output must NOT contain 'Vibe Kanban:' when AgentInfo is empty")
+		require.NotContains(t, outputEmpty, "My Agent:",
+			"output must NOT contain 'My Agent:' when AgentInfo is empty")
 	})
 }

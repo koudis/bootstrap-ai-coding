@@ -19,7 +19,7 @@ Build Resources is a pseudo-agent that installs common build toolchains and lang
 
 **Package:** `internal/agents/buildresources/buildresources.go`
 
-**Validates: BR-1 through BR-6**
+**Validates: BR-1 through BR-6** (including BR-2 AC-9, AC-10 and BR-4 updated health checks)
 
 ---
 
@@ -51,7 +51,7 @@ func (a *buildResourcesAgent) ID() string {
 }
 
 // Install appends Dockerfile RUN steps that install Python 3, uv, CMake,
-// build-essential, OpenJDK, and Go.
+// build-essential, OpenJDK, Go, graphify, tree, and btop.
 // Satisfies: BR-2
 func (a *buildResourcesAgent) Install(b *docker.DockerfileBuilder) {
     // All apt packages installed by this agent, listed explicitly for easy
@@ -66,6 +66,8 @@ func (a *buildResourcesAgent) Install(b *docker.DockerfileBuilder) {
         "default-jdk",
         // Common build dependencies
         "libssl-dev", "libffi-dev",
+        // Terminal and directory utilities
+        "tree", "btop",
         // Utilities
         "curl", "ca-certificates", "unzip", "wget",
     }
@@ -82,6 +84,14 @@ func (a *buildResourcesAgent) Install(b *docker.DockerfileBuilder) {
     // Python uv — installed system-wide to /usr/local/bin via official installer.
     // Using UV_INSTALL_DIR avoids user-local PATH issues with docker exec (runs as root).
     b.Run("curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh")
+
+    // graphify — knowledge graph skill for AI coding assistants.
+    // Installed via uv tool install into an isolated venv; UV_TOOL_BIN_DIR places
+    // the executable in /usr/local/bin so it's on all users' PATH.
+    b.Run("UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy")
+
+    // Set up graphify as a Claude Code skill (creates files in ~/.claude/skills/graphify/).
+    b.Run("graphify install")
 }
 
 // CredentialStorePath returns empty — no credentials to persist.
@@ -114,6 +124,9 @@ func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client,
         {[]string{"cmake", "--version"}, "cmake"},
         {[]string{"javac", "-version"}, "javac"},
         {[]string{"bash", "-lc", "go version"}, "go"},
+        {[]string{"graphify", "--version"}, "graphify"},
+        {[]string{"tree", "--version"}, "tree"},
+        {[]string{"btop", "--version"}, "btop"},
     }
     for _, chk := range checks {
         exitCode, err := docker.ExecInContainer(ctx, c, containerID, chk.cmd)
@@ -140,13 +153,19 @@ func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client,
 
 4. **Go via official tarball:** The Go binary is installed from `go.dev/dl/` to `/usr/local/go` with PATH set via `/etc/profile.d/golang.sh`. This ensures the latest stable version regardless of what Ubuntu's package manager offers.
 
-5. **Health check uses `bash -lc` only for Go:** Go is available via a PATH entry in `/etc/profile.d/golang.sh`. Running it through `bash -lc` ensures the login profile is sourced. All other tools (python3, uv, cmake, javac) are on the default PATH and don't need login shell invocation.
+5. **Health check uses `bash -lc` only for Go:** Go is available via a PATH entry in `/etc/profile.d/golang.sh`. Running it through `bash -lc` ensures the login profile is sourced. All other tools (python3, uv, cmake, javac, graphify, tree, btop) are on the default PATH and don't need login shell invocation.
 
 6. **`RunAsUser` builder method:** The `DockerfileBuilder` has a `RunAsUser(cmd string)` helper that emits `USER <username>` before the `RUN` and `USER root` after. While the Build Resources agent no longer uses it (all installs are system-wide), it remains available for future agents that need user-local installations.
 
 7. **`goVersion` private constant:** The Go version is declared as a private `const goVersion` in the agent package, making it easy to bump without searching through string literals.
 
-7. **Default inclusion:** Added to `constants.DefaultAgents` so it's always present unless the user explicitly overrides `--agents`. This means `go run . /path` installs Claude Code + Augment Code + Build Resources by default.
+8. **Default inclusion:** Added to `constants.DefaultAgents` so it's always present unless the user explicitly overrides `--agents`. This means `go run . /path` installs Claude Code + Augment Code + Build Resources by default.
+
+9. **`UV_TOOL_BIN_DIR=/usr/local/bin` for graphify:** By default, `uv tool install` places executables in `$HOME/.local/bin` (XDG convention). During Docker build (running as root), that resolves to `/root/.local/bin`, which is not on the Container_User's PATH. Setting `UV_TOOL_BIN_DIR=/usr/local/bin` ensures the `graphify` executable is placed in a system-wide location accessible to all users without additional PATH configuration.
+
+10. **`uv tool install` over `pip install`:** Ubuntu 26.04 enforces PEP 668 (externally-managed-environment), which prevents `pip install` from installing packages into the system Python. `uv tool install` is preferred because: (a) it creates an isolated venv for the tool (cleaner than `--break-system-packages`), and (b) `uv` is already installed by this module (AC-2), so no additional dependency is needed.
+
+11. **`graphify install` post-installation step:** After `uv tool install graphifyy` makes the executable available, `graphify install` must be run to set up the Claude Code skill. This creates skill files in `~/.claude/skills/graphify/` that Claude Code discovers at runtime.
 
 ---
 
@@ -185,8 +204,11 @@ RUN curl ca-certificates git + nodejs           ← Claude/Augment shared deps
 RUN npm install -g @anthropic-ai/claude-code    ← Claude Code
 RUN npm install -g @augmentcode/auggie          ← Augment Code
 RUN python3 cmake build-essential default-jdk …  ← Build Resources (system)
+RUN tree btop                                    ← Build Resources (terminal utilities)
 RUN go tarball + /etc/profile.d/golang.sh       ← Build Resources (Go)
 RUN uv install (UV_INSTALL_DIR=/usr/local/bin)  ← Build Resources (uv)
+RUN UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy  ← Build Resources (graphify)
+RUN graphify install                            ← Build Resources (graphify Claude Code skill)
 RUN echo manifest > /bac-manifest.json          ← manifest
 # NO CMD — that belongs in Instance_Image
 ```

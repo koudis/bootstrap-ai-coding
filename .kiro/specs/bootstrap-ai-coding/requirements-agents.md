@@ -228,7 +228,7 @@ Build Resources is a pseudo-agent that does not provide an AI coding tool. Inste
 
 ### Glossary
 
-- **Build_Resources**: The set of system packages and language runtimes installed by this module: Python 3 (complete with setuptools/wheel), Python uv (system-wide via `UV_INSTALL_DIR`), CMake, build-essential, OpenJDK, Go, and common build dependencies (pkg-config, libssl-dev, libffi-dev, unzip, wget).
+- **Build_Resources**: The set of system packages and language runtimes installed by this module: Python 3 (complete with setuptools/wheel), Python uv (system-wide via `UV_INSTALL_DIR`), CMake, build-essential, OpenJDK, Go, graphify (knowledge graph skill for AI coding assistants, installed via `uv tool install`), tree (directory listing utility), btop (terminal-based resource monitor), and common build dependencies (pkg-config, libssl-dev, libffi-dev, unzip, wget).
 
 ---
 
@@ -257,8 +257,10 @@ Build Resources is a pseudo-agent that does not provide an AI coding tool. Inste
 6. THE Build Resources module SHALL contribute Dockerfile steps that install **OpenJDK**: `default-jdk` (provides both JDK and JRE).
 7. THE Build Resources module SHALL contribute Dockerfile steps that install **Go** (latest stable) via the official tarball from `https://go.dev/dl/`, extracted to `/usr/local/go`, with `/usr/local/go/bin` added to the system-wide `PATH`.
 8. THE Build Resources module SHALL contribute Dockerfile steps that install **common build dependencies**: `pkg-config`, `libssl-dev`, `libffi-dev`, `unzip`, `wget`. These are transitive dependencies commonly required when building Python, Go, and C/C++ packages from source.
-9. ALL packages and runtimes SHALL be installed globally (system-wide), including uv which uses `UV_INSTALL_DIR=/usr/local/bin`.
-10. ALL installed tools SHALL be available to the Container_User without manual intervention after the container starts.
+9. THE Build Resources module SHALL contribute Dockerfile steps that install **terminal and directory utilities**: `tree` (directory listing), `btop` (terminal-based resource monitor).
+10. THE Build Resources module SHALL contribute Dockerfile steps that install **graphify** via `UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy`. Graphify is an open-source knowledge graph skill for AI coding assistants (GitHub: safishamsi/graphify). After installation, `graphify install` SHALL be run to set it up as a Claude Code skill. Requires Python 3.10+ (satisfied by the python3 installation in AC-1). Note: `uv tool install` is used instead of `pip install` because Ubuntu 26.04 enforces PEP 668 (externally-managed-environment), and uv is already installed by this module (AC-2). The `UV_TOOL_BIN_DIR=/usr/local/bin` environment variable ensures the `graphify` executable is placed in a system-wide location accessible by all users (by default, `uv tool install` places executables in `$HOME/.local/bin` which would not be on the Container_User's PATH when the build runs as root).
+11. ALL packages and runtimes SHALL be installed globally (system-wide), including uv which uses `UV_INSTALL_DIR=/usr/local/bin`.
+12. ALL installed tools SHALL be available to the Container_User without manual intervention after the container starts.
 
 ---
 
@@ -286,6 +288,9 @@ Build Resources is a pseudo-agent that does not provide an AI coding tool. Inste
    - `cmake --version`
    - `javac -version`
    - `go version` (executed via `bash -lc` to pick up `/etc/profile.d/golang.sh`)
+   - `graphify --version`
+   - `tree --version`
+   - `btop --version`
 2. THE Health_Check SHALL be invoked by the core after the Container starts.
 3. IF any Health_Check command fails, THE core SHALL report the failure to the user with a descriptive error message identifying the Build Resources agent and the specific tool that failed.
 

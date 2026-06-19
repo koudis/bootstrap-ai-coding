@@ -303,6 +303,54 @@ func TestBuildResourcesHealthCheck(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// TestTreeAvailable
+// Validates: BR-2.9
+// ----------------------------------------------------------------------------
+
+func TestTreeAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"tree", "--version"})
+	require.NoError(t, err, "exec tree --version")
+	require.Equal(t, 0, exitCode, "expected 'tree --version' to exit 0")
+}
+
+// ----------------------------------------------------------------------------
+// TestBtopAvailable
+// Validates: BR-2.9
+// ----------------------------------------------------------------------------
+
+func TestBtopAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"btop", "--version"})
+	require.NoError(t, err, "exec btop --version")
+	require.Equal(t, 0, exitCode, "expected 'btop --version' to exit 0")
+}
+
+// ----------------------------------------------------------------------------
+// TestGraphifyAvailable
+// Validates: BR-2.10
+// ----------------------------------------------------------------------------
+
+func TestGraphifyAvailable(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	ctx := context.Background()
+	exitCode, err := docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"graphify", "--version"})
+	require.NoError(t, err, "exec graphify --version")
+	require.Equal(t, 0, exitCode, "expected 'graphify --version' to exit 0")
+}
+
+// ----------------------------------------------------------------------------
 // Internal helpers
 // ----------------------------------------------------------------------------
 

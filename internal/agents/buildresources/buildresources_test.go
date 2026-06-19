@@ -74,6 +74,7 @@ func TestInstallAppendsExpectedPackages(t *testing.T) {
 		"default-jdk",
 		"libssl-dev", "libffi-dev",
 		"curl", "ca-certificates", "unzip", "wget",
+		"tree", "btop",
 	}
 	for _, pkg := range expectedPackages {
 		require.Contains(t, content, pkg,
@@ -97,6 +98,12 @@ func TestInstallAppendsExpectedPackages(t *testing.T) {
 		"Install() must install uv via official installer")
 	require.Contains(t, content, "UV_INSTALL_DIR=/usr/local/bin",
 		"Install() must install uv to /usr/local/bin")
+
+	// Verify graphify installation
+	require.Contains(t, content, "UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy",
+		"Install() must install graphify via uv tool install")
+	require.Contains(t, content, "graphify install",
+		"Install() must run graphify install")
 }
 
 // TestSummaryInfoReturnsNil verifies that the Build Resources agent's SummaryInfo

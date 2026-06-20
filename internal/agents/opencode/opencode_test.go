@@ -322,21 +322,15 @@ func TestOpenCodeHasCredentialsStatError(t *testing.T) {
 	a, err := agent.Lookup(constants.OpenCodeAgentName)
 	require.NoError(t, err)
 
-	// Create a directory with a file inside, then remove all permissions from
-	// the directory to trigger a stat error on files inside it.
+	// Use a regular file as the store path. When HasCredentials tries to stat
+	// "auth.json" inside it (filepath.Join(file, "auth.json")), the OS returns
+	// a "not a directory" error deterministically — no chmod tricks needed.
 	tmpDir := t.TempDir()
-	authFile := filepath.Join(tmpDir, "auth.json")
-	err = os.WriteFile(authFile, []byte(`{"token":"test"}`), 0o000)
-	require.NoError(t, err)
-	err = os.Chmod(tmpDir, 0o000)
+	notADir := filepath.Join(tmpDir, "fakedir")
+	err = os.WriteFile(notADir, []byte("not a directory"), 0o644)
 	require.NoError(t, err)
 
-	t.Cleanup(func() {
-		// Restore permissions so the test framework can clean up.
-		os.Chmod(tmpDir, 0o755)
-	})
-
-	hasCreds, credErr := a.HasCredentials(tmpDir)
+	hasCreds, credErr := a.HasCredentials(notADir)
 	require.False(t, hasCreds)
 	require.Error(t, credErr)
 	require.Contains(t, credErr.Error(), "checking opencode credentials")
@@ -427,6 +421,6 @@ func TestOpenCodeSummaryInfoReturnsNil(t *testing.T) {
 // TestOpenCodeNotInDefaultAgents verifies that constants.DefaultAgents does not
 // contain "open-code" — it is opt-in only.
 func TestOpenCodeNotInDefaultAgents(t *testing.T) {
-	require.False(t, strings.Contains(constants.DefaultAgents, "open-code"),
-		"constants.DefaultAgents must NOT contain 'open-code' — it is opt-in only")
+	require.False(t, strings.Contains(constants.DefaultAgents, constants.OpenCodeAgentName),
+		"constants.DefaultAgents must NOT contain %q — it is opt-in only", constants.OpenCodeAgentName)
 }

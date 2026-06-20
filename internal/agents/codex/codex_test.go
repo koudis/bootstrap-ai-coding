@@ -266,21 +266,15 @@ func TestCodexHasCredentialsStatError(t *testing.T) {
 	a, err := agent.Lookup(constants.CodexAgentName)
 	require.NoError(t, err)
 
-	// Create a directory with a file inside, then remove all permissions from
-	// the directory to trigger a stat error on files inside it.
+	// Use a regular file as the store path. When HasCredentials tries to stat
+	// "auth.json" inside it (filepath.Join(file, "auth.json")), the OS returns
+	// a "not a directory" error deterministically — no chmod tricks needed.
 	tmpDir := t.TempDir()
-	authFile := filepath.Join(tmpDir, "auth.json")
-	err = os.WriteFile(authFile, []byte(`{"token":"test"}`), 0o000)
-	require.NoError(t, err)
-	err = os.Chmod(tmpDir, 0o000)
+	notADir := filepath.Join(tmpDir, "fakedir")
+	err = os.WriteFile(notADir, []byte("not a directory"), 0o644)
 	require.NoError(t, err)
 
-	t.Cleanup(func() {
-		// Restore permissions so the test framework can clean up.
-		os.Chmod(tmpDir, 0o755)
-	})
-
-	hasCreds, credErr := a.HasCredentials(tmpDir)
+	hasCreds, credErr := a.HasCredentials(notADir)
 	require.False(t, hasCreds)
 	require.Error(t, credErr)
 	require.Contains(t, credErr.Error(), "checking codex credentials")

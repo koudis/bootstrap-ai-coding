@@ -19,7 +19,7 @@ Build Resources is a pseudo-agent that installs common build toolchains and lang
 
 **Package:** `internal/agents/buildresources/buildresources.go`
 
-**Validates: BR-1 through BR-6** (including BR-2 AC-9, AC-10 and BR-4 updated health checks)
+**Validates: BR-1 through BR-6** (including BR-2.9, BR-2.10 for tree/btop/graphify and BR-4 updated health checks)
 
 ---
 

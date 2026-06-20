@@ -51,6 +51,7 @@ func parseSSHConfig(path string) ([]sshConfigStanza, error) {
 		if strings.HasPrefix(strings.ToLower(trimmed), "host ") {
 			// Start a new stanza.
 			if current != nil {
+				current.lines = trimTrailingEmptyLines(current.lines)
 				stanzas = append(stanzas, *current)
 			}
 			hostVal := strings.TrimSpace(trimmed[5:]) // everything after "Host "
@@ -68,9 +69,18 @@ func parseSSHConfig(path string) ([]sshConfigStanza, error) {
 		return nil, fmt.Errorf("reading SSH config: %w", err)
 	}
 	if current != nil {
+		current.lines = trimTrailingEmptyLines(current.lines)
 		stanzas = append(stanzas, *current)
 	}
 	return stanzas, nil
+}
+
+// trimTrailingEmptyLines removes trailing blank lines from a slice of strings.
+func trimTrailingEmptyLines(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // writeSSHConfig serialises stanzas back to the SSH config file.

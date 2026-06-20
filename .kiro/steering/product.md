@@ -27,7 +27,7 @@ Enabled agents:  claude-code, augment-code, build-resources
 ## Key design goals
 
 - **Zero-friction startup**: one command, one argument, ready to SSH in
-- **Pluggable agents**: AI coding agents (Claude Code, Augment Code, etc.) are self-contained modules — adding a new agent requires no changes to core code
+- **Pluggable agents**: AI coding agents (Claude Code, Augment Code, Codex, OpenCode, etc.) are self-contained modules — adding a new agent requires no changes to core code
 - **Credential persistence**: per-agent bind-mounts keep auth tokens alive across sessions; a headless D-Bus keyring (gnome-keyring-daemon) runs inside the container so tools using libsecret can store and refresh OAuth tokens without a graphical desktop — login once, never again
 - **Non-root safety**: CLI refuses to run as root; containers run as Container_User with UID/GID matching the host user
 - **Stable SSH identity**: SSH host keys are generated once per project and reused across rebuilds — no `known_hosts` churn

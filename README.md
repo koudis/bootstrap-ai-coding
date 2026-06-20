@@ -120,6 +120,8 @@ The first three agents are enabled by default. Use `--agents` to enable a specif
 | `claude-code` | [Claude Code](https://github.com/anthropics/claude-code) by Anthropic | `~/.claude/` | `/home/<user>/.claude/` |
 | `augment-code` | [Augment Code](https://www.augmentcode.com) (Auggie CLI) | `~/.augment/` | `/home/<user>/.augment/` |
 | `build-resources` | Common build toolchains and runtimes (Python, Go, Java, CMake, ripgrep, etc.) | — | — |
+| `codex` | [Codex](https://github.com/openai/codex) by OpenAI (opt-in) | `~/.codex/` | `/home/<user>/.codex/` |
+| `open-code` | [OpenCode](https://github.com/anomalyco/opencode) terminal AI agent (opt-in) | `~/.local/share/opencode/` | `/home/<user>/.local/share/opencode/` |
 
 ### Examples
 
@@ -135,13 +137,22 @@ bac <project-path> --agents augment-code
 
 # Claude Code + build tools
 bac <project-path> --agents claude-code,build-resources
+
+# Codex (opt-in)
+bac <project-path> --agents codex
+
+# OpenCode (opt-in)
+bac <project-path> --agents open-code
+
+# All agents
+bac <project-path> --agents claude-code,augment-code,build-resources,codex,open-code
 ```
 
 ## Agents
 
 ### Claude Code (`claude-code`)
 
-Installs Node.js 22 and the `@anthropic-ai/claude-code` npm package globally. Credential store at `~/.claude/` is bind-mounted into the container.
+Installs Node.js 22 and the `@anthropic-ai/claude-code` npm package globally. Credential store at `~/.claude/` is bind-mounted into the container. A headless D-Bus keyring (gnome-keyring-daemon) is configured so OAuth tokens can be stored and refreshed without a graphical desktop.
 
 ### Augment Code (`augment-code`)
 
@@ -159,6 +170,23 @@ A pseudo-agent that installs common build toolchains and language runtimes:
 
 No credentials to persist — this agent only adds build tools to the image.
 
+### Codex (`codex`) — opt-in
+
+Installs Node.js 22 and the `@openai/codex` npm package globally. Credential store at `~/.codex/` is bind-mounted into the container. Authentication is stored in `auth.json` within the credential directory.
+
+Enable with `--agents codex` or alongside defaults: `--agents claude-code,augment-code,build-resources,codex`.
+
+### OpenCode (`open-code`) — opt-in
+
+Installs Node.js 22 and the `opencode-ai` npm package globally. Two directories are bind-mounted:
+
+- **Auth store**: `~/.local/share/opencode/` → `/home/<user>/.local/share/opencode/`
+- **Config store**: `~/.config/opencode/` → `/home/<user>/.config/opencode/`
+
+This agent implements the `AdditionalMounter` interface to support the secondary config mount. Authentication is stored in `auth.json` within the auth store directory.
+
+Enable with `--agents open-code` or alongside defaults: `--agents claude-code,augment-code,build-resources,open-code`.
+
 ### Credential persistence
 
 Credentials are stored on the host and bind-mounted into every container — so if you are already logged in on your host machine, the container inherits your credentials automatically with no extra login step. The tool only prompts you when no credentials are found:
@@ -166,6 +194,8 @@ Credentials are stored on the host and bind-mounted into every container — so 
 ```
 Authenticate claude-code inside the container: run 'claude' and complete the login flow.
 Authenticate augment-code inside the container: run 'auggie login' and complete the login flow.
+Authenticate codex inside the container: run 'codex' and complete the login flow.
+Authenticate open-code inside the container: run 'opencode' and complete the login flow.
 ```
 
 Once you authenticate inside the container, the tokens are written back to the host-side credential store and reused for every future session across all projects.

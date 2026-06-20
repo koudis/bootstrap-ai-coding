@@ -92,7 +92,11 @@ Add a single blank import — this is the **only** core file that changes:
 
 ```go
 import (
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"
     _ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/codex"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/opencode"
     _ "github.com/koudis/bootstrap-ai-coding/internal/agents/aider" // add this line
 )
 ```
@@ -146,13 +150,27 @@ Add a new section to `.kiro/specs/bootstrap-ai-coding/requirements-agents.md` fo
 
 | Method | What it must return |
 |---|---|
-| `ID()` | Unique, stable, kebab-case string (e.g. `"claude-code"`, `"aider"`) |
+| `ID()` | Unique, stable, kebab-case string (e.g. `"claude-code"`, `"codex"`) |
 | `Install(b)` | Appends `RUN` steps to `b`; must be idempotent and self-contained |
 | `CredentialStorePath()` | Default host path for auth tokens; may use `~/` prefix |
 | `ContainerMountPath(homeDir)` | Absolute path inside container; use `homeDir` parameter as base |
 | `HasCredentials(path)` | `(true, nil)` if tokens exist; `(false, nil)` if empty; `(false, err)` on error |
 | `HealthCheck(ctx, c, id)` | `nil` if agent is ready; non-nil error if not. `c` is the existing `*docker.Client` — do not create a new one. |
 | `SummaryInfo(ctx, c, id)` | `([]KeyValue, nil)` with key:value pairs for session summary; `(nil, nil)` if nothing to report; `(nil, err)` on failure |
+
+## Optional Interface: AdditionalMounter
+
+If an agent needs more than one bind-mount (e.g. separate auth and config directories), implement the `agent.AdditionalMounter` interface:
+
+```go
+// AdditionalMounter is an optional interface that agents can implement to
+// declare additional bind-mounts beyond the single primary credential store.
+type AdditionalMounter interface {
+    AdditionalMounts(homeDir string) []docker.Mount
+}
+```
+
+The core calls this after processing `CredentialStorePath`/`ContainerMountPath` and appends the returned mounts to the container spec. See `internal/agents/opencode/opencode.go` for a reference implementation.
 
 ## Import Rules for Agent Modules
 
@@ -169,6 +187,6 @@ Agent modules must **NOT** import:
 
 ## Naming Convention
 
-- Agent ID: kebab-case, lowercase (e.g. `"claude-code"`, `"aider"`, `"gemini-code"`)
-- Package name: single word, lowercase (e.g. `claude`, `aider`, `gemini`)
-- Directory: matches package name (e.g. `agents/claude/`, `agents/aider/`)
+- Agent ID: kebab-case, lowercase (e.g. `"claude-code"`, `"augment-code"`, `"codex"`, `"open-code"`)
+- Package name: single word or concatenated, lowercase (e.g. `claude`, `augment`, `codex`, `opencode`, `buildresources`)
+- Directory: matches package name (e.g. `agents/claude/`, `agents/codex/`, `agents/opencode/`)

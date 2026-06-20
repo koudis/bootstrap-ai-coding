@@ -42,8 +42,14 @@ bootstrap-ai-coding/
     └── agents/
         ├── claude/
         │   └── claude.go                # Claude Code agent module (reference implementation)
-        └── augment/
-            └── augment.go               # Augment Code agent module
+        ├── augment/
+        │   └── augment.go               # Augment Code agent module
+        ├── buildresources/
+        │   └── buildresources.go        # Build Resources pseudo-agent (toolchains, no credentials)
+        ├── codex/
+        │   └── codex.go                 # OpenAI Codex agent module (opt-in)
+        └── opencode/
+            └── opencode.go              # OpenCode agent module (opt-in, AdditionalMounter)
         # future agents: internal/agents/<name>/<name>.go — no core files change
 ```
 
@@ -63,8 +69,11 @@ bootstrap-ai-coding/
 // In main.go:
 import (
     "github.com/koudis/bootstrap-ai-coding/internal/cmd"
-    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
     _ "github.com/koudis/bootstrap-ai-coding/internal/agents/augment"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/codex"
+    _ "github.com/koudis/bootstrap-ai-coding/internal/agents/opencode"
 )
 
 // In internal packages:
@@ -86,6 +95,6 @@ import (
 - SSH port: starts at `2222` (constants.SSHPortStart), increments until free, persisted per project
 - SSH host key type: `ed25519` (constants.SSHHostKeyType) — generated once per project, reused across rebuilds
 - Manifest file inside image: `/bac-manifest.json` (constants.ManifestFilePath) — lists enabled agent IDs for rebuild detection
-- Default agents: `claude-code,augment-code` (constants.DefaultAgents)
+- Default agents: `claude-code,augment-code,build-resources` (constants.DefaultAgents)
 - File permissions: Tool_Data_Dir `0700` (constants.ToolDataDirPerm), all files within `0600` (constants.ToolDataFilePerm)
 - Headless keyring: D-Bus session bus + gnome-keyring-daemon started via `/etc/profile.d/dbus-keyring.sh` on SSH login — enables libsecret-based credential storage (CC-7)

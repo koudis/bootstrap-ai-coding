@@ -2,14 +2,14 @@
 
 ## Overview
 
-Agent Summary Info is a mechanism that allows agent modules to contribute their own key:value pairs to the session summary printed by the core after a successful container start. This eliminates the need for the core to contain agent-specific logic (such as port discovery for Vibe Kanban) and restores the architectural rule that "core has zero knowledge of agents."
+Agent Summary Info is a mechanism that allows agent modules to contribute their own key:value pairs to the session summary printed by the core after a successful container start. This eliminates the need for the core to contain agent-specific logic and restores the architectural rule that "core has zero knowledge of agents."
 
 Each agent module implements a `SummaryInfo` method on the Agent_Interface. The core iterates over enabled agents, calls `SummaryInfo()` on each, and appends any returned key:value pairs to the session summary output. Agents that have nothing to report return nil.
 
 ## Glossary
 
 - **Summary_Info**: A slice of key:value pairs returned by an agent's `SummaryInfo()` method, representing additional labelled lines to include in the session summary.
-- **KeyValue**: A struct with `Key string` and `Value string` fields, representing a single labelled line in the session summary (e.g. Key=`"Vibe Kanban"`, Value=`"http://localhost:3000"`).
+- **KeyValue**: A struct with `Key string` and `Value string` fields, representing a single labelled line in the session summary (e.g. Key=`"My Agent"`, Value=`"http://localhost:8080"`).
 
 ---
 
@@ -54,33 +54,20 @@ Each agent module implements a `SummaryInfo` method on the Agent_Interface. The 
 
 ---
 
-### Requirement SI-4: Remove Hardcoded Vibe Kanban Logic from Core
+### Requirement SI-4: Remove Hardcoded Agent Logic from Core
 
-**User Story:** As a platform maintainer, I want all Vibe Kanban–specific logic removed from the core so that the architectural rule "core has zero knowledge of agents" is restored.
-
-#### Acceptance Criteria
-
-1. THE `VibeKanbanURL` field SHALL be removed from the `SessionSummary` struct in `internal/cmd/root.go`.
-2. THE `discoverVibeKanbanPort()` function SHALL be removed from `internal/cmd/root.go`.
-3. THE `constants.VibeKanbanAgentName` reference SHALL be removed from `internal/cmd/root.go` — the core SHALL NOT reference any agent by name or identifier.
-4. THE `FormatSessionSummary` function SHALL NOT contain any conditional logic specific to Vibe Kanban or any other individual agent.
-
----
-
-### Requirement SI-5: Vibe Kanban SummaryInfo Implementation
-
-**User Story:** As a developer, I want the Vibe Kanban agent to report its URL via the `SummaryInfo` mechanism so that the session summary still shows the Vibe Kanban URL without the core containing Vibe Kanban–specific code.
+**User Story:** As a platform maintainer, I want all agent-specific logic removed from the core so that the architectural rule "core has zero knowledge of agents" is restored.
 
 #### Acceptance Criteria
 
-1. THE Vibe Kanban module SHALL implement `SummaryInfo()` by reading the port file (`/tmp/vibe-kanban.port`) written by the supervisor script after vibe-kanban starts and binds its auto-assigned port.
-2. WHEN the Vibe Kanban port is successfully discovered, THE `SummaryInfo()` method SHALL return a single `KeyValue` with Key `"Vibe Kanban"` and Value `"http://localhost:<port>"`.
-3. IF the Vibe Kanban port file cannot be read within 30 seconds (retrying every 2 seconds), THEN THE `SummaryInfo()` method SHALL return a non-nil error describing the timeout.
-4. THE port discovery logic SHALL reside entirely in the Vibe Kanban agent package (`internal/agents/vibekanban/`) — the core SHALL NOT contain any port discovery code.
+1. THE `SessionSummary` struct in `internal/cmd/root.go` SHALL NOT contain fields specific to any individual agent.
+2. THE core SHALL NOT contain functions that discover or query individual agent state (e.g. port discovery for a specific agent).
+3. THE core SHALL NOT reference any agent by name or identifier — all agent interaction goes through the Agent_Interface.
+4. THE `FormatSessionSummary` function SHALL NOT contain any conditional logic specific to any individual agent.
 
 ---
 
-### Requirement SI-6: Other Agents Return Nil
+### Requirement SI-5: Other Agents Return Nil
 
 **User Story:** As a platform maintainer, I want agents that have no summary information to return nil from `SummaryInfo()` so that the core handles them uniformly without special cases.
 
@@ -92,7 +79,7 @@ Each agent module implements a `SummaryInfo` method on the Agent_Interface. The 
 
 ---
 
-### Requirement SI-7: Session Summary Formatting with Agent Info
+### Requirement SI-6: Session Summary Formatting with Agent Info
 
 **User Story:** As a developer, I want agent-contributed information to appear in the session summary with the same formatting as built-in fields so that the output is consistent and easy to read.
 

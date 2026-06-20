@@ -32,7 +32,7 @@ var aptPackages = []string{
 	// Version control extras
 	"git-lfs",
 	// Terminal and shell utilities
-	"tmux", "less", "file", "shellcheck",
+	"tmux", "less", "file", "shellcheck", "tree", "btop",
 	// Database
 	"sqlite3",
 	// Archive handling
@@ -73,6 +73,10 @@ func (a *buildResourcesAgent) Install(b *docker.DockerfileBuilder) {
 	// Using UV_INSTALL_DIR to place the binary where all users can access it,
 	// avoiding user-local PATH issues with docker exec (which runs as root).
 	b.Run("curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh")
+
+	// Graphify — knowledge graph skill for AI coding assistants
+	b.Run("UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy")
+	b.Run("graphify install")
 }
 
 // CredentialStorePath returns empty — no credentials to persist.
@@ -116,6 +120,9 @@ func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client,
 		{[]string{"jq", "--version"}, "jq"},
 		{[]string{"git-lfs", "--version"}, "git-lfs"},
 		{[]string{"tmux", "-V"}, "tmux"},
+		{[]string{"graphify", "--version"}, "graphify"},
+		{[]string{"tree", "--version"}, "tree"},
+		{[]string{"btop", "--version"}, "btop"},
 	}
 	for _, chk := range checks {
 		exitCode, err := docker.ExecInContainer(ctx, c, containerID, chk.cmd)

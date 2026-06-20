@@ -1501,7 +1501,6 @@ func TestInstanceImageSSHDConfigHostNetwork(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Unit tests for Entrypoint builder method
-// Validates: VK-3.1
 // ---------------------------------------------------------------------------
 
 func TestBuilderEntrypointSingleArg(t *testing.T) {

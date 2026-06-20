@@ -43,13 +43,6 @@ SSH connect:     ssh bac-myproject
 Enabled agents:  claude-code, augment-code, build-resources
 ```
 
-When optional agents like `vibe-kanban` are enabled, their info appears after the standard fields:
-
-```
-Enabled agents:  claude-code, augment-code, build-resources, vibe-kanban
-Vibe Kanban:     http://localhost:3000
-```
-
 After that, `ssh bac-myproject` works — no port or username to remember.
 
 ## Prerequisites
@@ -105,7 +98,7 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 | Flag | Description |
 |---|---|
 | `<project-path>` | Path to the project directory to mount (required for start/stop) |
-| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code,build-resources`; available: also `vibe-kanban`) |
+| `--agents <ids>` | Comma-separated agent IDs to enable (default: `claude-code,augment-code,build-resources`) |
 | `--port <n>` | Override the SSH port (1024–65535; default: auto-selected from 2222 upward) |
 | `--ssh-key <path>` | Override the SSH public key path |
 | `--rebuild` | Force a full container image rebuild |
@@ -120,14 +113,13 @@ Removes all bac-managed containers, images, tool data (`~/.config/bootstrap-ai-c
 
 ## Supported Agents
 
-The first three agents are enabled by default. Use `--agents` to enable a specific subset or add optional agents.
+The first three agents are enabled by default. Use `--agents` to enable a specific subset.
 
 | Agent ID | Description | Credential store | Container mount |
 |---|---|---|---|
 | `claude-code` | [Claude Code](https://github.com/anthropics/claude-code) by Anthropic | `~/.claude/` | `/home/<user>/.claude/` |
 | `augment-code` | [Augment Code](https://www.augmentcode.com) (Auggie CLI) | `~/.augment/` | `/home/<user>/.augment/` |
 | `build-resources` | Common build toolchains and runtimes (Python, Go, Java, CMake, ripgrep, etc.) | — | — |
-| `vibe-kanban` | Web-based kanban board for AI coding sessions (auto-starts as background service) | — | — |
 
 ### Examples
 
@@ -143,9 +135,6 @@ bac <project-path> --agents augment-code
 
 # Claude Code + build tools
 bac <project-path> --agents claude-code,build-resources
-
-# All agents including Vibe Kanban
-bac <project-path> --agents claude-code,augment-code,build-resources,vibe-kanban
 ```
 
 ## Agents
@@ -169,23 +158,6 @@ A pseudo-agent that installs common build toolchains and language runtimes:
 - **Tools**: ripgrep, fd-find, jq, git-lfs, tmux, shellcheck, neovim, sqlite3, curl, wget, zip, unzip
 
 No credentials to persist — this agent only adds build tools to the image.
-
-### Vibe Kanban (`vibe-kanban`)
-
-A web-based kanban board for AI coding sessions, distributed as the `vibe-kanban` npm package. Unlike other agents, Vibe Kanban runs as a **background service** inside the container — it auto-starts when the container boots and is accessible from your host browser.
-
-- Auto-starts via an ENTRYPOINT wrapper script (no manual launch needed)
-- Crash recovery with backoff (max 5 restarts in 60 seconds)
-- Auto-assigns a port at startup; the URL is shown in the session summary
-- No credentials to persist
-
-When enabled, the session summary includes the Vibe Kanban URL:
-
-```
-Vibe Kanban:     http://localhost:3000
-```
-
-Not enabled by default — add it with `--agents claude-code,augment-code,build-resources,vibe-kanban`.
 
 ### Credential persistence
 

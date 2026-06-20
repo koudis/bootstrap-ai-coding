@@ -63,10 +63,13 @@ const (
 	// Corresponds to the Agent_ID glossary term for Build Resources (BR-1).
 	BuildResourcesAgentName = "build-resources"
 
-	// VibeKanbanAgentName is the stable Agent_ID for the Vibe Kanban agent
-	// module that provides a web-based project management tool.
-	// Corresponds to the Agent_ID glossary term for Vibe Kanban (VK-1).
-	VibeKanbanAgentName = "vibe-kanban"
+	// CodexAgentName is the stable Agent_ID for the OpenAI Codex CLI agent module.
+	// Corresponds to the Agent_ID glossary term for Codex (CX-1).
+	CodexAgentName = "codex"
+
+	// OpenCodeAgentName is the stable Agent_ID for the OpenCode agent module.
+	// Corresponds to the Agent_ID glossary term for OpenCode.
+	OpenCodeAgentName = "open-code"
 
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
 	// --agents flag is omitted. Claude Code, Augment Code, and Build Resources

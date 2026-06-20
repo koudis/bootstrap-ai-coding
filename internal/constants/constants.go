@@ -63,6 +63,10 @@ const (
 	// Corresponds to the Agent_ID glossary term for Build Resources (BR-1).
 	BuildResourcesAgentName = "build-resources"
 
+	// CodexAgentName is the stable Agent_ID for the OpenAI Codex CLI agent module.
+	// Corresponds to the Agent_ID glossary term for Codex (CX-1).
+	CodexAgentName = "codex"
+
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
 	// --agents flag is omitted. Claude Code, Augment Code, and Build Resources
 	// are enabled by default.

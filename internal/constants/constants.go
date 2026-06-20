@@ -67,6 +67,10 @@ const (
 	// Corresponds to the Agent_ID glossary term for Codex (CX-1).
 	CodexAgentName = "codex"
 
+	// OpenCodeAgentName is the stable Agent_ID for the OpenCode agent module.
+	// Corresponds to the Agent_ID glossary term for OpenCode.
+	OpenCodeAgentName = "open-code"
+
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
 	// --agents flag is omitted. Claude Code, Augment Code, and Build Resources
 	// are enabled by default.

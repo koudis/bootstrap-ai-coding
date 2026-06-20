@@ -39,6 +39,7 @@ Individual agent files below specify how each module satisfies this contract.
 | [Augment Code](./agents/requirements-augment-code.md) | AC-1 through AC-6 | Default agent |
 | [Build Resources](./agents/requirements-build-resources.md) | BR-1 through BR-6 | Default pseudo-agent |
 | [Codex](./agents/requirements-codex.md) | CX-1 through CX-6 | Opt-in only |
+| [OpenCode](./agents/requirements-opencode.md) | OC-1 through OC-6 | Opt-in only |
 
 ---
 

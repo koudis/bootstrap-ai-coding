@@ -723,6 +723,15 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 			HostPath:      s.resolvedPath,
 			ContainerPath: containerPath,
 		})
+		// Check if the agent declares additional mounts (e.g. OpenCode config store).
+		if mounter, ok := s.a.(agent.AdditionalMounter); ok {
+			for _, extra := range mounter.AdditionalMounts(info.HomeDir) {
+				if err := datadir.EnsureCredentialDir(extra.HostPath); err != nil {
+					return fmt.Errorf("ensuring additional credential dir for %s: %w", s.a.ID(), err)
+				}
+				mounts = append(mounts, extra)
+			}
+		}
 	}
 
 	spec := dockerpkg.ContainerSpec{

@@ -9,6 +9,7 @@ import (
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/buildresources"
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/claude"
 	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/codex"
+	_ "github.com/koudis/bootstrap-ai-coding/internal/agents/opencode"
 )
 
 func main() {

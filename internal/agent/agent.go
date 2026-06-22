@@ -22,7 +22,7 @@ type Agent interface {
 	CredentialStorePath() string
 	ContainerMountPath(homeDir string) string
 	HasCredentials(storePath string) (bool, error)
-	HealthCheck(ctx context.Context, c *docker.Client, containerID string) error
+	HealthCheck(ctx context.Context, c *docker.Client, containerID string, username string) error
 	SummaryInfo(ctx context.Context, c *docker.Client, containerID string) ([]KeyValue, error)
 }
 

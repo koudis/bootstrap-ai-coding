@@ -20,7 +20,7 @@ func (s *stubAgent) Install(_ *docker.DockerfileBuilder)                     {}
 func (s *stubAgent) CredentialStorePath() string                             { return "" }
 func (s *stubAgent) ContainerMountPath(homeDir string) string                { return "" }
 func (s *stubAgent) HasCredentials(_ string) (bool, error)                   { return false, nil }
-func (s *stubAgent) HealthCheck(_ context.Context, _ *docker.Client, _ string) error { return nil }
+func (s *stubAgent) HealthCheck(_ context.Context, _ *docker.Client, _ string, _ string) error { return nil }
 func (s *stubAgent) SummaryInfo(_ context.Context, _ *docker.Client, _ string) ([]agent.KeyValue, error) {
 	return nil, nil
 }

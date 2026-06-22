@@ -75,7 +75,9 @@ func (a *buildResourcesAgent) Install(b *docker.DockerfileBuilder) {
 	b.Run("curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh")
 
 	// Graphify — knowledge graph skill for AI coding assistants
-	b.Run("UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy")
+	// UV_TOOL_DIR ensures the tool venv is in a shared location (not /root/.local/share/uv/tools)
+	// UV_TOOL_BIN_DIR ensures the symlink lands in /usr/local/bin
+	b.Run("UV_TOOL_DIR=/opt/uv-tools UV_TOOL_BIN_DIR=/usr/local/bin uv tool install graphifyy")
 	b.Run("graphify install")
 }
 
@@ -105,27 +107,27 @@ func (a *buildResourcesAgent) SummaryInfo(ctx context.Context, c *docker.Client,
 
 // HealthCheck verifies all build tools are installed and executable.
 // Satisfies: BR-4
-func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
+func (a *buildResourcesAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string, username string) error {
 	checks := []struct {
-		cmd  []string
+		cmd  string
 		name string
 	}{
-		{[]string{"python3", "--version"}, "python3"},
-		{[]string{"uv", "--version"}, "uv"},
-		{[]string{"cmake", "--version"}, "cmake"},
-		{[]string{"javac", "-version"}, "javac"},
-		{[]string{"bash", "-lc", "go version"}, "go"},
-		{[]string{"rg", "--version"}, "ripgrep"},
-		{[]string{"fdfind", "--version"}, "fd-find"},
-		{[]string{"jq", "--version"}, "jq"},
-		{[]string{"git-lfs", "--version"}, "git-lfs"},
-		{[]string{"tmux", "-V"}, "tmux"},
-		{[]string{"graphify", "--version"}, "graphify"},
-		{[]string{"tree", "--version"}, "tree"},
-		{[]string{"btop", "--version"}, "btop"},
+		{"python3 --version", "python3"},
+		{"uv --version", "uv"},
+		{"cmake --version", "cmake"},
+		{"javac -version", "javac"},
+		{"go version", "go"},
+		{"rg --version", "ripgrep"},
+		{"fdfind --version", "fd-find"},
+		{"jq --version", "jq"},
+		{"git-lfs --version", "git-lfs"},
+		{"tmux -V", "tmux"},
+		{"graphify --version", "graphify"},
+		{"tree --version", "tree"},
+		{"btop --version", "btop"},
 	}
 	for _, chk := range checks {
-		exitCode, err := docker.ExecInContainer(ctx, c, containerID, chk.cmd)
+		exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"su", "-", username, "-c", chk.cmd})
 		if err != nil {
 			return fmt.Errorf("build-resources health check failed (%s): %w", chk.name, err)
 		}

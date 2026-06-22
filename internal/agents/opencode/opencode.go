@@ -36,6 +36,14 @@ func (a *opencodeAgent) Install(b *docker.DockerfileBuilder) {
 		b.MarkNodeInstalled()
 	}
 	b.Run("npm install -g --no-fund --no-audit opencode-ai")
+	// Pre-create directories that opencode expects to write to on first run.
+	// Without this, Docker bind-mounts for credential/config paths cause
+	// intermediate directories (~/.local, ~/.cache, ~/.config) to be created
+	// as root, preventing the non-root Container_User from writing state/cache.
+	b.Run(fmt.Sprintf(
+		"mkdir -p %[1]s/.local/share/opencode %[1]s/.local/state/opencode %[1]s/.cache/opencode %[1]s/.config/opencode && chown -R %[2]s:%[2]s %[1]s/.local %[1]s/.cache %[1]s/.config",
+		b.HomeDir(), b.Username(),
+	))
 }
 
 // CredentialStorePath returns the default host-side credential directory for
@@ -70,8 +78,8 @@ func (a *opencodeAgent) HasCredentials(storePath string) (bool, error) {
 
 // HealthCheck verifies that the opencode binary is present and executable inside
 // the running container by executing `opencode --version`.
-func (a *opencodeAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
-	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"opencode", "--version"})
+func (a *opencodeAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string, username string) error {
+	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"su", "-", username, "-c", "opencode --version"})
 	if err != nil {
 		return fmt.Errorf("opencode health check failed: %w", err)
 	}

@@ -31,6 +31,7 @@ var (
 	sharedSSHPort       int
 	sharedClient        *docker.Client
 	sharedImageTag      string
+	sharedUsername      string
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,
@@ -119,6 +120,7 @@ func setupSharedContainer() error {
 	sharedContainerName = constants.ContainerNamePrefix + sanitizeOpencode(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
+	sharedUsername = info.Username
 
 	// Build base image
 	baseSpec := docker.ContainerSpec{
@@ -265,7 +267,7 @@ func TestOpenCodeHealthCheck(t *testing.T) {
 	opencodeAgent, err := agent.Lookup(constants.OpenCodeAgentName)
 	require.NoError(t, err, "looking up opencode agent")
 
-	err = opencodeAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	err = opencodeAgent.HealthCheck(ctx, sharedClient, sharedContainerName, sharedUsername)
 	require.NoError(t, err, "opencode HealthCheck should return no error")
 }
 

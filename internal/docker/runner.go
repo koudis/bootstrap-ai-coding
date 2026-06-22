@@ -345,10 +345,18 @@ func ListBACImagesWithFallback(ctx context.Context, c *Client) ([]image.Summary,
 	return images, nil
 }
 
-// ExecInContainer runs a command inside a running container and returns the exit code.
+// ExecInContainer runs a command inside a running container as root and returns the exit code.
 func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []string) (int, error) {
+	return ExecInContainerAsUser(ctx, c, containerID, cmd, "")
+}
+
+// ExecInContainerAsUser runs a command inside a running container as the specified
+// user and returns the exit code. If username is empty, the command runs as the
+// container's default user (typically root).
+func ExecInContainerAsUser(ctx context.Context, c *Client, containerID string, cmd []string, username string) (int, error) {
 	execID, err := c.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          cmd,
+		User:         username,
 		AttachStdout: true,
 		AttachStderr: true,
 	})
@@ -360,22 +368,18 @@ func ExecInContainer(ctx context.Context, c *Client, containerID string, cmd []s
 	if err != nil {
 		return -1, fmt.Errorf("attaching to exec in container %s: %w", containerID, err)
 	}
-	resp.Close()
+	defer resp.Close()
 
-	for {
-		inspect, err := c.ContainerExecInspect(ctx, execID.ID)
-		if err != nil {
-			return -1, fmt.Errorf("inspecting exec in container %s: %w", containerID, err)
-		}
-		if !inspect.Running {
-			return inspect.ExitCode, nil
-		}
-		select {
-		case <-ctx.Done():
-			return -1, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
+	// Drain the output stream so the exec process can complete naturally.
+	// Without this, closing the attach connection prematurely may cause the
+	// Docker daemon to kill the process, producing spurious non-zero exit codes.
+	_, _ = io.Copy(io.Discard, resp.Reader)
+
+	inspect, err := c.ContainerExecInspect(ctx, execID.ID)
+	if err != nil {
+		return -1, fmt.Errorf("inspecting exec in container %s: %w", containerID, err)
 	}
+	return inspect.ExitCode, nil
 }
 
 // ExecInContainerWithOutput runs a command inside a running container and returns

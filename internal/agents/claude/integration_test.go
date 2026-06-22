@@ -31,6 +31,7 @@ var (
 	sharedSSHPort       int
 	sharedClient        *docker.Client
 	sharedImageTag      string
+	sharedUsername      string
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,
@@ -119,6 +120,7 @@ func setupSharedContainer() error {
 	sharedContainerName = constants.ContainerNamePrefix + sanitizeClaude(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
+	sharedUsername = info.Username
 
 	// Build base image
 	baseSpec := docker.ContainerSpec{
@@ -236,7 +238,7 @@ func TestClaudeHealthCheck(t *testing.T) {
 	claudeAgent, err := agent.Lookup(constants.ClaudeCodeAgentName)
 	require.NoError(t, err, "looking up claude agent")
 
-	err = claudeAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	err = claudeAgent.HealthCheck(ctx, sharedClient, sharedContainerName, sharedUsername)
 	require.NoError(t, err, "claude HealthCheck should return no error")
 }
 

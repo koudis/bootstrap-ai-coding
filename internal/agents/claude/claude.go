@@ -140,8 +140,8 @@ func (a *claudeAgent) PrepareCredentials(storePath string) error {
 	return nil
 }
 
-func (a *claudeAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
-	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"claude", "--version"})
+func (a *claudeAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string, username string) error {
+	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"su", "-", username, "-c", "claude --version"})
 	if err != nil {
 		return fmt.Errorf("claude health check failed: %w", err)
 	}

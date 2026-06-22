@@ -72,8 +72,8 @@ func (a *codexAgent) HasCredentials(storePath string) (bool, error) {
 // HealthCheck verifies that the codex binary is present and executable inside
 // the running container by executing `codex --version`.
 // Satisfies: CX-5
-func (a *codexAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string) error {
-	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"codex", "--version"})
+func (a *codexAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string, username string) error {
+	exitCode, err := docker.ExecInContainer(ctx, c, containerID, []string{"su", "-", username, "-c", "codex --version"})
 	if err != nil {
 		return fmt.Errorf("codex health check failed: %w", err)
 	}

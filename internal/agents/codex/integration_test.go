@@ -31,6 +31,7 @@ var (
 	sharedSSHPort       int
 	sharedClient        *docker.Client
 	sharedImageTag      string
+	sharedUsername      string
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,
@@ -119,6 +120,7 @@ func setupSharedContainer() error {
 	sharedContainerName = constants.ContainerNamePrefix + sanitizeCodex(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
+	sharedUsername = info.Username
 
 	// Build base image
 	baseSpec := docker.ContainerSpec{
@@ -236,7 +238,7 @@ func TestCodexHealthCheck(t *testing.T) {
 	codexAgent, err := agent.Lookup(constants.CodexAgentName)
 	require.NoError(t, err, "looking up codex agent")
 
-	err = codexAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	err = codexAgent.HealthCheck(ctx, sharedClient, sharedContainerName, sharedUsername)
 	require.NoError(t, err, "codex HealthCheck should return no error")
 }
 

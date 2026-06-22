@@ -31,6 +31,7 @@ var (
 	sharedSSHPort       int
 	sharedClient        *docker.Client
 	sharedImageTag      string
+	sharedUsername      string
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,
@@ -119,6 +120,7 @@ func setupSharedContainer() error {
 	sharedContainerName = constants.ContainerNamePrefix + sanitizeBR(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
+	sharedUsername = info.Username
 
 	// Build base image
 	baseSpec := docker.ContainerSpec{
@@ -298,7 +300,7 @@ func TestBuildResourcesHealthCheck(t *testing.T) {
 	brAgent, err := agent.Lookup(constants.BuildResourcesAgentName)
 	require.NoError(t, err, "looking up build-resources agent")
 
-	err = brAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	err = brAgent.HealthCheck(ctx, sharedClient, sharedContainerName, sharedUsername)
 	require.NoError(t, err, "build-resources HealthCheck should return no error")
 }
 

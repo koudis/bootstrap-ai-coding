@@ -759,7 +759,7 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 
 	// Run health checks for all enabled agents (CC-5, AC-5, BR-4).
 	for _, a := range enabledAgents {
-		if err := a.HealthCheck(ctx, c, containerName); err != nil {
+		if err := a.HealthCheck(ctx, c, containerName, info.Username); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s health check: %v\n", a.ID(), err)
 		}
 	}

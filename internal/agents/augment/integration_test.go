@@ -31,6 +31,7 @@ var (
 	sharedSSHPort       int
 	sharedClient        *docker.Client
 	sharedImageTag      string
+	sharedUsername      string
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,
@@ -119,6 +120,7 @@ func setupSharedContainer() error {
 	sharedContainerName = constants.ContainerNamePrefix + sanitizeAugment(dirName)
 	sharedImageTag = sharedContainerName + ":latest"
 	sharedSSHPort = port
+	sharedUsername = info.Username
 
 	// Build base image
 	baseSpec := docker.ContainerSpec{
@@ -235,7 +237,7 @@ func TestAugmentHealthCheck(t *testing.T) {
 	augAgent, err := agent.Lookup(constants.AugmentCodeAgentName)
 	require.NoError(t, err, "looking up augment agent")
 
-	err = augAgent.HealthCheck(ctx, sharedClient, sharedContainerName)
+	err = augAgent.HealthCheck(ctx, sharedClient, sharedContainerName, sharedUsername)
 	require.NoError(t, err, "augment HealthCheck should return no error")
 }
 

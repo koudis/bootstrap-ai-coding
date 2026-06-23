@@ -345,9 +345,9 @@ func TestCodexSummaryInfoReturnsNil(t *testing.T) {
 	require.Nil(t, info)
 }
 
-// TestCodexNotInDefaultAgents verifies that constants.DefaultAgents does not
-// contain "codex" — it is opt-in only.
-func TestCodexNotInDefaultAgents(t *testing.T) {
-	require.False(t, strings.Contains(constants.DefaultAgents, "codex"),
-		"constants.DefaultAgents must NOT contain 'codex' — it is opt-in only")
+// TestCodexInDefaultAgents verifies that constants.DefaultAgents contains "codex"
+// as part of the expanded five-agent default set.
+func TestCodexInDefaultAgents(t *testing.T) {
+	require.True(t, strings.Contains(constants.DefaultAgents, "codex"),
+		"constants.DefaultAgents must contain 'codex' — it is now a default agent")
 }

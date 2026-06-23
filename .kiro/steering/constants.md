@@ -33,7 +33,7 @@ This means:
 | `BuildResourcesAgentName` | `"build-resources"` | Agent_ID for Build Resources (BR-1) |
 | `CodexAgentName` | `"codex"` | Agent_ID for Codex (CX-1) |
 | `OpenCodeAgentName` | `"open-code"` | Agent_ID for OpenCode (OC-1) |
-| `DefaultAgents` | `"claude-code,augment-code,build-resources"` | default `Enabled_Agents` (Req 7.5) |
+| `DefaultAgents` | `"claude-code,augment-code,build-resources,open-code,codex"` | default `Enabled_Agents` (Req 7.5) |
 | `SSHHostKeyType` | `"ed25519"` | SSH host key algorithm |
 | `MinDockerVersion` | `"20.10"` | minimum Docker version (Req 6.3) |
 | `ToolDataDirPerm` | `0o700` | Tool_Data_Dir permissions (Req 15.2) |

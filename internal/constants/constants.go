@@ -72,9 +72,9 @@ const (
 	OpenCodeAgentName = "open-code"
 
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
-	// --agents flag is omitted. Claude Code, Augment Code, and Build Resources
-	// are enabled by default.
-	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName + "," + BuildResourcesAgentName
+	// --agents flag is omitted. Claude Code, Augment Code, Build Resources,
+	// OpenCode, and Codex are enabled by default.
+	DefaultAgents = ClaudeCodeAgentName + "," + AugmentCodeAgentName + "," + BuildResourcesAgentName + "," + OpenCodeAgentName + "," + CodexAgentName
 
 	// SSHHostKeyType is the algorithm used for the container's SSH host key pair.
 	// Determines the key file names on disk (ssh_host_<type>_key) and the path

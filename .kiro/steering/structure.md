@@ -95,6 +95,6 @@ import (
 - SSH port: starts at `2222` (constants.SSHPortStart), increments until free, persisted per project
 - SSH host key type: `ed25519` (constants.SSHHostKeyType) — generated once per project, reused across rebuilds
 - Manifest file inside image: `/bac-manifest.json` (constants.ManifestFilePath) — lists enabled agent IDs for rebuild detection
-- Default agents: `claude-code,augment-code,build-resources` (constants.DefaultAgents)
+- Default agents: `claude-code,augment-code,build-resources,open-code,codex` (constants.DefaultAgents)
 - File permissions: Tool_Data_Dir `0700` (constants.ToolDataDirPerm), all files within `0600` (constants.ToolDataFilePerm)
 - Headless keyring: D-Bus session bus + gnome-keyring-daemon started via `/etc/profile.d/dbus-keyring.sh` on SSH login — enables libsecret-based credential storage (CC-7)

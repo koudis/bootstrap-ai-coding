@@ -418,9 +418,9 @@ func TestOpenCodeSummaryInfoReturnsNil(t *testing.T) {
 	require.Nil(t, info)
 }
 
-// TestOpenCodeNotInDefaultAgents verifies that constants.DefaultAgents does not
-// contain "open-code" — it is opt-in only.
-func TestOpenCodeNotInDefaultAgents(t *testing.T) {
-	require.False(t, strings.Contains(constants.DefaultAgents, constants.OpenCodeAgentName),
-		"constants.DefaultAgents must NOT contain %q — it is opt-in only", constants.OpenCodeAgentName)
+// TestOpenCodeInDefaultAgents verifies that constants.DefaultAgents contains
+// "open-code" as part of the expanded five-agent default set.
+func TestOpenCodeInDefaultAgents(t *testing.T) {
+	require.True(t, strings.Contains(constants.DefaultAgents, constants.OpenCodeAgentName),
+		"constants.DefaultAgents must contain %q — it is now a default agent", constants.OpenCodeAgentName)
 }

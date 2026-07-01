@@ -34,16 +34,6 @@ func (a *claudeAgent) Install(b *docker.DockerfileBuilder) {
 	}
 	b.Run("npm install -g --no-fund --no-audit @anthropic-ai/claude-code")
 
-	// Symlink ~/.claude.json into the credential mount directory so that a single
-	// bind-mount on ~/.claude/ persists both OAuth tokens (.credentials.json) and
-	// onboarding state (claude.json). Without this, Claude Code triggers the full
-	// login/onboarding flow on every container start.
-	b.Run(fmt.Sprintf(
-		"ln -sf %s/claude.json %s/.claude.json",
-		filepath.Join(b.HomeDir(), ".claude"),
-		b.HomeDir(),
-	))
-
 	// Copy host user's Claude Code memory (CLAUDE.md) into the image so that
 	// global instructions are available even before the bind-mount overlays.
 	// The bind-mount at runtime will take precedence, but this ensures the
@@ -106,38 +96,24 @@ func (a *claudeAgent) HasCredentials(storePath string) (bool, error) {
 	return true, nil
 }
 
-// PrepareCredentials copies ~/.claude.json into the credential store as
-// claude.json (if it exists and the destination is absent or older).
-// Inside the container a symlink at ~/.claude.json points to this file,
-// so the bind-mount on ~/.claude/ covers both OAuth tokens and onboarding state.
-func (a *claudeAgent) PrepareCredentials(storePath string) error {
+// AdditionalMounts returns the read-only bind-mount for ~/.claude.json.
+// If the file does not exist on the host, the mount is omitted.
+func (a *claudeAgent) AdditionalMounts(homeDir string) []docker.Mount {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil // best-effort; skip if we can't determine home
-	}
-	src := filepath.Join(home, ".claude.json")
-	dst := filepath.Join(storePath, "claude.json")
-
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		// Source doesn't exist — nothing to sync (first-time user).
 		return nil
 	}
-
-	// Only copy if destination is missing or older than source.
-	dstInfo, err := os.Stat(dst)
-	if err == nil && !dstInfo.ModTime().Before(srcInfo.ModTime()) {
-		return nil // destination is up-to-date
+	src := filepath.Join(home, ".claude.json")
+	if _, err := os.Stat(src); err != nil {
+		return nil // file absent or unreadable — skip gracefully
 	}
-
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", src, err)
+	return []docker.Mount{
+		{
+			HostPath:      src,
+			ContainerPath: filepath.Join(homeDir, ".claude.json"),
+			ReadOnly:      true,
+		},
 	}
-	if err := os.WriteFile(dst, data, 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", dst, err)
-	}
-	return nil
 }
 
 func (a *claudeAgent) HealthCheck(ctx context.Context, c *docker.Client, containerID string, username string) error {

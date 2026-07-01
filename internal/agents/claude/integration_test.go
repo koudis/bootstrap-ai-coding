@@ -32,6 +32,8 @@ var (
 	sharedClient        *docker.Client
 	sharedImageTag      string
 	sharedUsername      string
+	sharedHomeDir       string
+	sharedClaudeJSON    string // path to the temp .claude.json mounted into the container
 )
 
 // TestMain gates the integration suite behind an explicit consent prompt,

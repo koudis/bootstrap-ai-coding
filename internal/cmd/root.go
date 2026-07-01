@@ -726,9 +726,20 @@ func runStart(c *dockerpkg.Client, projectPath string, enabledAgents []agent.Age
 		// Check if the agent declares additional mounts (e.g. OpenCode config store).
 		if mounter, ok := s.a.(agent.AdditionalMounter); ok {
 			for _, extra := range mounter.AdditionalMounts(info.HomeDir) {
-				if err := datadir.EnsureCredentialDir(extra.HostPath); err != nil {
-					return fmt.Errorf("ensuring additional credential dir for %s: %w", s.a.ID(), err)
+				// Only ensure directory creation for directory mounts.
+				// File mounts (e.g. ~/.claude.json RO) must not trigger MkdirAll.
+				if fi, err := os.Stat(extra.HostPath); err == nil && fi.IsDir() {
+					if err := datadir.EnsureCredentialDir(extra.HostPath); err != nil {
+						return fmt.Errorf("ensuring additional credential dir for %s: %w", s.a.ID(), err)
+					}
+				} else if err != nil && !extra.ReadOnly {
+					// Path doesn't exist and mount is read-write: create as directory.
+					if err := datadir.EnsureCredentialDir(extra.HostPath); err != nil {
+						return fmt.Errorf("ensuring additional credential dir for %s: %w", s.a.ID(), err)
+					}
 				}
+				// If path doesn't exist and mount is read-only, skip — the agent's
+				// AdditionalMounts should have omitted it, but don't create garbage.
 				mounts = append(mounts, extra)
 			}
 		}

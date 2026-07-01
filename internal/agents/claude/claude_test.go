@@ -313,12 +313,12 @@ func TestClaudeInstallNodeAlreadyInstalled(t *testing.T) {
 	require.Contains(t, content, "curl ca-certificates git",
 		"must always install curl, ca-certificates, git")
 
-	// Should have added exactly 3 lines (apt-get prereqs + npm install + symlink)
+	// Should have added exactly 2 lines (apt-get prereqs + npm install)
 	// plus optionally 1 more if ~/.claude/CLAUDE.md exists on the host (memory injection)
 	linesAfter := len(b.Lines())
 	added := linesAfter - linesBefore
-	require.True(t, added == 3 || added == 4,
-		"must add 3 RUN steps (prereqs + npm + symlink) plus optionally 1 memory injection step, got %d", added)
+	require.True(t, added == 2 || added == 3,
+		"must add 2 RUN steps (prereqs + npm) plus optionally 1 memory injection step, got %d", added)
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +335,63 @@ func TestSummaryInfoReturnsNil(t *testing.T) {
 	info, err := a.SummaryInfo(context.Background(), nil, "")
 	require.NoError(t, err)
 	require.Nil(t, info)
+}
+
+// ---------------------------------------------------------------------------
+// AdditionalMounts tests
+// ---------------------------------------------------------------------------
+
+// TestClaudeAdditionalMountsFileExists verifies that when ~/.claude.json exists
+// on the host, AdditionalMounts returns a single read-only mount with the correct paths.
+// Validates: 1.1, 1.2, 1.4, 5.1
+func TestClaudeAdditionalMountsFileExists(t *testing.T) {
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	claudeJSON := filepath.Join(tmpDir, ".claude.json")
+	err = os.WriteFile(claudeJSON, []byte(`{"mcpServers":{}}`), 0o600)
+	require.NoError(t, err)
+
+	t.Setenv("HOME", tmpDir)
+
+	mounter, ok := a.(agent.AdditionalMounter)
+	require.True(t, ok, "claude agent must implement agent.AdditionalMounter")
+
+	mounts := mounter.AdditionalMounts("/home/testuser")
+	require.Len(t, mounts, 1, "must return exactly 1 mount when ~/.claude.json exists")
+	require.Equal(t, claudeJSON, mounts[0].HostPath)
+	require.Equal(t, "/home/testuser/.claude.json", mounts[0].ContainerPath)
+	require.True(t, mounts[0].ReadOnly, "mount must be read-only")
+}
+
+// TestClaudeAdditionalMountsFileAbsent verifies that when ~/.claude.json does not
+// exist on the host, AdditionalMounts returns an empty slice.
+// Validates: 1.3, 5.1
+func TestClaudeAdditionalMountsFileAbsent(t *testing.T) {
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	// No .claude.json created in tmpDir
+	t.Setenv("HOME", tmpDir)
+
+	mounter, ok := a.(agent.AdditionalMounter)
+	require.True(t, ok, "claude agent must implement agent.AdditionalMounter")
+
+	mounts := mounter.AdditionalMounts("/home/testuser")
+	require.Empty(t, mounts, "must return empty slice when ~/.claude.json does not exist")
+}
+
+// TestClaudeDoesNotImplementCredentialPreparer verifies that the Claude agent
+// no longer satisfies agent.CredentialPreparer after the symlink removal.
+// Validates: 3.3
+func TestClaudeDoesNotImplementCredentialPreparer(t *testing.T) {
+	a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+	require.NoError(t, err)
+
+	_, ok := a.(agent.CredentialPreparer)
+	require.False(t, ok, "claude agent must NOT implement agent.CredentialPreparer")
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +421,38 @@ func TestPropertyAgentContainerMountPathUsesRuntimeHomeDir(t *testing.T) {
 					"agent %q: ContainerMountPath(%q) = %q must not contain /home/dev",
 					a.ID(), homeDir, mountPath)
 			}
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Feature: claude-json-readonly-mount, Property 1: AdditionalMounts returns 0 or 1 read-only mounts
+// ---------------------------------------------------------------------------
+
+// Feature: claude-json-readonly-mount, Property 1: AdditionalMounts returns 0 or 1 read-only mounts
+func TestPropertyAdditionalMountsReturnsZeroOrOneReadOnlyMounts(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		homeDir := rapid.StringMatching(`/[a-z][a-z0-9]*(/[a-z][a-z0-9]*)*`).Draw(t, "homeDir")
+
+		a, err := agent.Lookup(constants.ClaudeCodeAgentName)
+		require.NoError(t, err)
+
+		mounter, ok := a.(agent.AdditionalMounter)
+		require.True(t, ok)
+
+		mounts := mounter.AdditionalMounts(homeDir)
+
+		// Property 1: slice length is 0 or 1
+		require.True(t, len(mounts) == 0 || len(mounts) == 1,
+			"AdditionalMounts must return 0 or 1 elements, got %d", len(mounts))
+
+		if len(mounts) == 1 {
+			// Property 2: mount is read-only
+			require.True(t, mounts[0].ReadOnly,
+				"mount must be read-only")
+			// Property 3: ContainerPath is deterministic
+			require.Equal(t, filepath.Join(homeDir, ".claude.json"), mounts[0].ContainerPath,
+				"ContainerPath must be filepath.Join(homeDir, \".claude.json\")")
 		}
 	})
 }

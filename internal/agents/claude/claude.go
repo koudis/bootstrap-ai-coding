@@ -104,8 +104,9 @@ func (a *claudeAgent) AdditionalMounts(homeDir string) []docker.Mount {
 		return nil
 	}
 	src := filepath.Join(home, ".claude.json")
-	if _, err := os.Stat(src); err != nil {
-		return nil // file absent or unreadable — skip gracefully
+	info, err := os.Stat(src)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil // absent, unreadable, or not a regular file — skip gracefully
 	}
 	return []docker.Mount{
 		{

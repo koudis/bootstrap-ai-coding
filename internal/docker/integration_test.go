@@ -1322,14 +1322,14 @@ func TestReadOnlyFileMountIsReadableButNotWritable(t *testing.T) {
 	_, err = docker.CreateContainer(ctx, sharedClient, spec)
 	require.NoError(t, err, "creating container with RO file mount")
 
-	err = docker.StartContainer(ctx, sharedClient, containerName)
-	require.NoError(t, err, "starting container with RO file mount")
-
 	t.Cleanup(func() {
 		cleanCtx := context.Background()
 		_ = docker.StopContainer(cleanCtx, sharedClient, containerName)
 		_ = docker.RemoveContainer(cleanCtx, sharedClient, containerName)
 	})
+
+	err = docker.StartContainer(ctx, sharedClient, containerName)
+	require.NoError(t, err, "starting container with RO file mount")
 
 	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 60*time.Second)
 	require.NoError(t, err, "waiting for SSH to be ready")

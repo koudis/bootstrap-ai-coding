@@ -1416,3 +1416,99 @@ func TestLoginShellLandsInWorkspace(t *testing.T) {
 	require.Equal(t, constants.WorkspaceMountPath, lastLine,
 		"SSH login shell working directory should be %s", constants.WorkspaceMountPath)
 }
+
+// ----------------------------------------------------------------------------
+// TestLoginShellFallsBackWhenWorkspaceMissing
+// Validates: Req 27.3
+// ----------------------------------------------------------------------------
+
+func TestLoginShellFallsBackWhenWorkspaceMissing(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	buildSharedImage(t)
+
+	ctx := context.Background()
+
+	dirName := fmt.Sprintf("no-ws-%d", time.Now().UnixNano())
+	containerName := constants.ContainerNamePrefix + sanitize(dirName)
+
+	port, err := findFreePort()
+	require.NoError(t, err, "finding free port")
+
+	// Create container WITHOUT a /workspace mount — the directory won't exist.
+	spec := docker.ContainerSpec{
+		Name:           containerName,
+		ImageTag:       sharedImageTag,
+		Mounts:         []docker.Mount{}, // no /workspace
+		SSHPort:        port,
+		Labels:         map[string]string{"bac.managed": "true"},
+		HostInfo:       sharedHostInfo,
+		HostNetworkOff: true,
+	}
+
+	_, err = docker.CreateContainer(ctx, sharedClient, spec)
+	require.NoError(t, err, "creating container without /workspace mount")
+
+	t.Cleanup(func() {
+		cleanCtx := context.Background()
+		_ = docker.StopContainer(cleanCtx, sharedClient, containerName)
+		_ = docker.RemoveContainer(cleanCtx, sharedClient, containerName)
+	})
+
+	err = docker.StartContainer(ctx, sharedClient, containerName)
+	require.NoError(t, err, "starting container")
+
+	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 60*time.Second)
+	require.NoError(t, err, "waiting for SSH to be ready")
+
+	info, err := hostinfo.Current()
+	require.NoError(t, err, "getting host info")
+
+	signer, err := gossh.ParsePrivateKey([]byte(sharedUserPrivKey))
+	require.NoError(t, err, "parsing user private key")
+
+	config := &gossh.ClientConfig{
+		User:            info.Username,
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
+	var sshClient *gossh.Client
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		sshClient, err = gossh.Dial("tcp", addr, config)
+		if err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.NoError(t, err, "SSH dial to %s", addr)
+	defer sshClient.Close()
+
+	session, err := sshClient.NewSession()
+	require.NoError(t, err, "creating SSH session")
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+
+	// Login shell must succeed even though /workspace doesn't exist.
+	err = session.Run("bash -l -c pwd")
+	require.NoError(t, err, "login shell must not fail when /workspace is missing")
+
+	// Working directory should fall back to home dir.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	lastLine := lines[len(lines)-1]
+	require.Equal(t, info.HomeDir, lastLine,
+		"working directory should fall back to home when /workspace is missing")
+
+	// No errors on stderr from the profile script.
+	require.Empty(t, stderr.String(),
+		"profile script must not emit errors when /workspace is missing")
+}

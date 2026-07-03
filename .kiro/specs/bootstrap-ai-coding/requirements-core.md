@@ -462,3 +462,16 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 12. THE `--host-network-off` flag SHALL only be valid in START mode; it is a START-only flag subject to the CLI-3 constraint.
 13. THE `--host-network-off` value SHALL influence the Instance_Image build: when absent (host mode), sshd_config includes `Port <SSH_Port>` and `ListenAddress 127.0.0.1`; when set (bridge mode), these directives are omitted.
 14. WHEN `--host-network-off` is changed between invocations for the same project (e.g. added or removed), THE CLI SHALL require `--rebuild` to regenerate the Instance_Image with the correct sshd_config. IF the network mode has changed and `--rebuild` is not set, THE CLI SHALL print a message instructing the user to run with `--rebuild` and exit with a zero exit code.
+
+---
+
+### Requirement 27: Workspace as Default Working Directory on SSH Login
+
+**User Story:** As a developer, I want to land directly in `/workspace` when I SSH into the container, so that I can start working on my project immediately without navigating there manually.
+
+#### Acceptance Criteria
+
+1. WHEN a user connects to the Container via SSH, THE shell session SHALL have its working directory set to `constants.WorkspaceMountPath` (`/workspace`).
+2. THE working directory change SHALL be implemented via a shell profile script at `constants.WorkspaceProfileScript` (`/etc/profile.d/workspace-cd.sh`) installed in the Base_Image layer.
+3. THE profile script SHALL fail silently (no error output, no non-zero exit) if `/workspace` is not accessible.
+4. THE Container_User's home directory SHALL remain unchanged — only the initial working directory of the SSH login session is affected.

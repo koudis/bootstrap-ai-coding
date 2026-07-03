@@ -47,6 +47,7 @@ This means:
 | `BaseImageTag` | `"bac-base:latest"` | Full base image reference (TL-11) |
 | `GitConfigPerm` | `0o444` | Injected .gitconfig permissions (Req 24) |
 | `KeyringProfileScript` | `"/etc/profile.d/dbus-keyring.sh"` | Keyring startup script path (CC-7) |
+| `WorkspaceProfileScript` | `"/etc/profile.d/workspace-cd.sh"` | Workspace cd-on-login script path (Req 27) |
 | `ImageBuildTimeout` | `8 * time.Minute` | Image_Build_Timeout (Req 14.7) |
 
 ### Variables (not const — Go does not support slice/map constants)

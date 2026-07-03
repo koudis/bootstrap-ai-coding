@@ -98,3 +98,4 @@ import (
 - Default agents: `claude-code,augment-code,build-resources,open-code,codex` (constants.DefaultAgents)
 - File permissions: Tool_Data_Dir `0700` (constants.ToolDataDirPerm), all files within `0600` (constants.ToolDataFilePerm)
 - Headless keyring: D-Bus session bus + gnome-keyring-daemon started via `/etc/profile.d/dbus-keyring.sh` on SSH login — enables libsecret-based credential storage (CC-7)
+- Workspace landing directory: `/etc/profile.d/workspace-cd.sh` changes the working directory to `/workspace` on SSH login (Req 27)

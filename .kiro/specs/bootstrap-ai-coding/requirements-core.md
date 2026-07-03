@@ -475,3 +475,4 @@ The core application is responsible for all orchestration: Docker lifecycle mana
 2. THE working directory change SHALL be implemented via a shell profile script at `constants.WorkspaceProfileScript` (`/etc/profile.d/workspace-cd.sh`) installed in the Base_Image layer.
 3. THE profile script SHALL fail silently (no error output, no non-zero exit) if `/workspace` is not accessible.
 4. THE Container_User's home directory SHALL remain unchanged — only the initial working directory of the SSH login session is affected.
+5. THE integration test SHALL verify this requirement via an actual SSH connection (using `golang.org/x/crypto/ssh`) — not via `docker exec` or `su -l` — to confirm the real user path works end-to-end.

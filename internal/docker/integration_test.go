@@ -3,6 +3,7 @@
 package docker_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -17,6 +18,7 @@ import (
 
 	dockerimage "github.com/docker/docker/api/types/image"
 	"github.com/stretchr/testify/require"
+	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
@@ -30,10 +32,11 @@ import (
 // ----------------------------------------------------------------------------
 
 var (
-	sharedImageTag  string
-	sharedClient    *docker.Client
-	sharedProjectDir string
-	sharedHostInfo  *hostinfo.Info
+	sharedImageTag    string
+	sharedClient      *docker.Client
+	sharedProjectDir  string
+	sharedHostInfo    *hostinfo.Info
+	sharedUserPrivKey string // PEM-encoded private key for SSH auth in tests
 )
 
 // TestMain ensures the base image is removed from the local Docker image store
@@ -72,8 +75,9 @@ func buildSharedImage(t *testing.T) {
 	hostKeyPriv, hostKeyPub, err := sshpkg.GenerateHostKeyPair()
 	require.NoError(t, err, "generating host key pair")
 
-	_, userPubKey, err := sshpkg.GenerateHostKeyPair()
+	userPrivKey, userPubKey, err := sshpkg.GenerateHostKeyPair()
 	require.NoError(t, err, "generating user key pair")
+	sharedUserPrivKey = userPrivKey
 
 	info, err := hostinfo.Current()
 	require.NoError(t, err, "getting host info")
@@ -1347,4 +1351,68 @@ func TestReadOnlyFileMountIsReadableButNotWritable(t *testing.T) {
 	})
 	require.NoError(t, err, "exec write attempt on RO-mounted file")
 	require.NotEqual(t, 0, exitCode, "expected write to RO-mounted file to fail")
+}
+
+// ----------------------------------------------------------------------------
+// TestLoginShellLandsInWorkspace
+// Validates: Req 27.1, 27.2
+// ----------------------------------------------------------------------------
+
+func TestLoginShellLandsInWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not available")
+	}
+
+	_, sshPort, _, cleanup := startContainerFromSharedImage(t)
+	t.Cleanup(cleanup)
+
+	info, err := hostinfo.Current()
+	require.NoError(t, err, "getting host info")
+
+	// Parse the user private key that was baked into the shared image.
+	signer, err := gossh.ParsePrivateKey([]byte(sharedUserPrivKey))
+	require.NoError(t, err, "parsing user private key for SSH auth")
+
+	// Connect via SSH — the real path a user takes.
+	config := &gossh.ClientConfig{
+		User:            info.Username,
+		Auth:            []gossh.AuthMethod{gossh.PublicKeys(signer)},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", sshPort)
+
+	// Retry SSH dial — sshd may need a moment after the TCP port becomes reachable.
+	var client *gossh.Client
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		client, err = gossh.Dial("tcp", addr, config)
+		if err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.NoError(t, err, "SSH dial to %s", addr)
+	defer client.Close()
+
+	session, err := client.NewSession()
+	require.NoError(t, err, "creating SSH session")
+	defer session.Close()
+
+	var stdout bytes.Buffer
+	session.Stdout = &stdout
+
+	// Use "bash -l -c pwd" to simulate the login shell that SSH spawns for
+	// interactive sessions. A plain "ssh host command" uses a non-login shell
+	// and won't source /etc/profile.d/*.sh.
+	err = session.Run("bash -l -c pwd")
+	require.NoError(t, err, "running pwd over SSH login shell")
+
+	// Profile scripts (e.g. dbus-keyring.sh) may emit output before pwd.
+	// Extract only the last line which is the pwd result.
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	lastLine := lines[len(lines)-1]
+	require.Equal(t, constants.WorkspaceMountPath, lastLine,
+		"SSH login shell working directory should be %s", constants.WorkspaceMountPath)
 }

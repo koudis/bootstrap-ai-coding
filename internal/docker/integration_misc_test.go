@@ -16,6 +16,7 @@ import (
 	"github.com/koudis/bootstrap-ai-coding/internal/constants"
 	"github.com/koudis/bootstrap-ai-coding/internal/docker"
 	"github.com/koudis/bootstrap-ai-coding/internal/hostinfo"
+	"github.com/koudis/bootstrap-ai-coding/internal/testutil"
 )
 
 // ----------------------------------------------------------------------------
@@ -71,16 +72,17 @@ func TestBuildImageTimeoutEnforced(t *testing.T) {
 // Validates: Req 10a.1 — FindConflictingUser must succeed even when the base
 // image is not present in the local Docker image store.
 //
-// Named with "A" prefix so Go's alphabetical test ordering runs this first.
-// The base image is guaranteed absent by TestMain's call to
-// EnsureBaseImageAbsent(), so this test simply calls FindConflictingUser and
-// asserts it succeeds (pulling the image automatically).
+// Calls EnsureBaseImageAbsent() at the start so the "image absent" scenario is
+// enforced regardless of test execution order within the package.
 // ----------------------------------------------------------------------------
 
 func TestAFindConflictingUserPullsImageIfAbsent(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
+
+	err := testutil.EnsureBaseImageAbsent()
+	require.NoError(t, err, "removing base image before test")
 
 	ctx := context.Background()
 

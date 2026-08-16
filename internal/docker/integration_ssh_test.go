@@ -68,7 +68,7 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 	client, err := docker.NewClient()
 	require.NoError(t, err)
 
-	buildAndGetFingerprint := func() string {
+	buildAndGetFingerprint := func(iteration int) string {
 		t.Helper()
 
 		strategy := docker.UserStrategyCreate
@@ -92,11 +92,11 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			ImageTag:   constants.BaseImageTag,
 			Dockerfile: builder.Build(),
 			Labels:     map[string]string{"bac.managed": "true"},
-			HostInfo: info,
+			HostInfo:   info,
 		}
 
 		_, err = docker.BuildImage(ctx, client, baseSpec, false)
-		require.NoError(t, err, "building base image")
+		require.NoError(t, err, "building base image (iteration %d)", iteration)
 
 		// Build instance image
 		instanceBuilder := docker.NewInstanceImageBuilder(
@@ -113,22 +113,48 @@ func TestSSHHostKeyStableAcrossRebuild(t *testing.T) {
 			Mounts: []docker.Mount{
 				{HostPath: projectDir, ContainerPath: constants.WorkspaceMountPath},
 			},
-			SSHPort: port,
-			Labels:  map[string]string{"bac.managed": "true"},
-			HostInfo: info,
+			SSHPort:        port,
+			Labels:         map[string]string{"bac.managed": "true"},
+			HostInfo:       info,
+			HostNetworkOff: true,
 		}
 
 		_, err = docker.BuildImage(ctx, client, spec, false)
-		require.NoError(t, err, "building instance image")
+		require.NoError(t, err, "building instance image (iteration %d)", iteration)
 
-		return hostKeyPub
+		// Start a container from the built image and read the actual host key.
+		_, err = docker.CreateContainer(ctx, client, spec)
+		require.NoError(t, err, "creating container (iteration %d)", iteration)
+
+		defer func() {
+			_ = docker.StopContainer(ctx, client, containerName)
+			_ = docker.RemoveContainer(ctx, client, containerName)
+		}()
+
+		err = docker.StartContainer(ctx, client, containerName)
+		require.NoError(t, err, "starting container (iteration %d)", iteration)
+
+		err = docker.WaitForSSH(ctx, "127.0.0.1", port, 60*time.Second)
+		require.NoError(t, err, "waiting for SSH (iteration %d)", iteration)
+
+		// Read the actual SSH host key fingerprint from inside the running container.
+		exitCode, stdout, err := docker.ExecInContainerWithOutput(ctx, client, containerName, []string{
+			"ssh-keygen", "-lf", "/etc/ssh/ssh_host_ed25519_key.pub",
+		})
+		require.NoError(t, err, "exec ssh-keygen in container (iteration %d)", iteration)
+		require.Equal(t, 0, exitCode, "ssh-keygen must succeed (iteration %d)", iteration)
+
+		fingerprint := strings.TrimSpace(stdout)
+		require.NotEmpty(t, fingerprint, "fingerprint must not be empty (iteration %d)", iteration)
+
+		return fingerprint
 	}
 
-	fingerprint1 := buildAndGetFingerprint()
-	fingerprint2 := buildAndGetFingerprint()
+	fingerprint1 := buildAndGetFingerprint(1)
+	fingerprint2 := buildAndGetFingerprint(2)
 
 	require.Equal(t, fingerprint1, fingerprint2,
-		"SSH host key fingerprint must be stable across rebuilds")
+		"SSH host key fingerprint observed from running container must be stable across rebuilds")
 
 	t.Cleanup(func() {
 		cleanCtx := context.Background()

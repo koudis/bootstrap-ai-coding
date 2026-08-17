@@ -241,6 +241,22 @@ This script runs on every SSH login (interactive shells source `/etc/profile.d/*
 
 ---
 
+## Workspace Working Directory (Req 27)
+
+A shell profile script (`/etc/profile.d/workspace-cd.sh`) is installed that changes the working directory to `/workspace` on SSH login, so the user lands directly in their project directory without a manual `cd`.
+
+```sh
+#!/bin/sh
+# /etc/profile.d/workspace-cd.sh — land in the workspace directory on SSH login
+cd /workspace 2>/dev/null || true
+```
+
+The `2>/dev/null || true` suppresses errors if `/workspace` is not mounted (defensive; in practice the mount is always present). Like the keyring script, this runs on every interactive SSH login via the `/etc/profile.d/*.sh` sourcing mechanism.
+
+**Validates: Req 27**
+
+---
+
 ## Git Configuration Forwarding (Req 24)
 
 The `DockerfileBuilder` injects the host user's `~/.gitconfig` into the container image at build time, following the same pattern as SSH host key injection (step 6 in the constructor). The git config content is read by the caller (`cmd/root.go`) and passed to the builder as an optional string parameter.

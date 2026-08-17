@@ -199,6 +199,7 @@ RUN useradd <username>                          ← stable per user
 RUN sudoers                                     ← stable
 RUN dbus-x11 gnome-keyring libsecret-1-0        ← keyring (CC-7)
 RUN /etc/profile.d/dbus-keyring.sh              ← keyring startup
+RUN /etc/profile.d/workspace-cd.sh             ← workspace cd-on-login (Req 27)
 RUN gitconfig                                   ← git config (Req 24)
 RUN curl ca-certificates git + nodejs           ← Claude/Augment shared deps
 RUN npm install -g @anthropic-ai/claude-code    ← Claude Code

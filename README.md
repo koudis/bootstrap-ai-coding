@@ -1,8 +1,8 @@
 # bootstrap-ai-coding
 
-`bootstrap-ai-coding` (`bac`) is a Go CLI tool that provisions an isolated Docker container for AI-assisted coding sessions.
+`bootstrap-ai-coding` (`bac`) is a Go CLI tool that provisions an isolated Docker container for AI-assisted coding sessions. Your agent credentials are bind-mounted from the host — no login or settings transfer needed, just run and code.
 
-Primarily designed to work with Visual Studio Code but it works with any IDE with code-over-ssh.
+Primarily designed to work with Codium and Visual Studio Code but it works with any IDE with code-over-ssh.
 
 ## Install
 
@@ -18,7 +18,7 @@ wget https://github.com/koudis/bootstrap-ai-coding/releases/latest/download/bac-
 
 1. `bac <project_path>`
 2. Open Visual Studio Code, press Ctrl+Shift+P, run Remote-SSH and choose `bac-<project_folder_name>` target to connect.
-3. `<project_path>` can be found under `/workspace`
+3. Your shell starts in `/workspace` — your mounted project directory, ready to go.
 
 where `project_folder_name` is the name of the bottom-most folder in `project_path`. (`/my/nice/project` → `project`)
 
@@ -43,7 +43,7 @@ SSH connect:     ssh bac-myproject
 Enabled agents:  claude-code, augment-code, build-resources
 ```
 
-After that, `ssh bac-myproject` works — no port or username to remember.
+After that, `ssh bac-myproject` works — no port or username to remember. You land directly in `/workspace` (your mounted project directory).
 
 ## Prerequisites
 

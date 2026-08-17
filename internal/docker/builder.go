@@ -116,7 +116,12 @@ func NewBaseImageBuilder(info *hostinfo.Info, strategy UserStrategy, conflicting
 	b.Run(fmt.Sprintf("printf '%s' > %s && chmod +x %s",
 		keyringScript, constants.KeyringProfileScript, constants.KeyringProfileScript))
 
-	// 7. Inject host user's ~/.gitconfig into the container (Req 24).
+	// 7. Install profile.d script that changes to the workspace directory on SSH login.
+	workspaceCdScript := fmt.Sprintf(`#!/bin/sh\ncd %s 2>/dev/null || true\n`, constants.WorkspaceMountPath)
+	b.Run(fmt.Sprintf("printf '%s' > %s && chmod +x %s",
+		workspaceCdScript, constants.WorkspaceProfileScript, constants.WorkspaceProfileScript))
+
+	// 8. Inject host user's ~/.gitconfig into the container (Req 24).
 	if b.gitConfig != "" {
 		encoded := base64.StdEncoding.EncodeToString([]byte(b.gitConfig))
 		gitConfigPath := fmt.Sprintf("%s/.gitconfig", info.HomeDir)

@@ -337,6 +337,14 @@
 
 ---
 
+#### Property 58: Workspace profile script is always created at constants.WorkspaceProfileScript
+
+*For any* UID/GID combination and user strategy (Create or Rename), the Base_Image Dockerfile produced by `NewBaseImageBuilder` SHALL contain a `RUN` instruction that creates a script at `constants.WorkspaceProfileScript` (`/etc/profile.d/workspace-cd.sh`) which references `constants.WorkspaceMountPath` (`/workspace`) and is made executable (`chmod +x`).
+
+**Validates: Req 27.1, 27.2, 27.3**
+
+---
+
 ### Agent Module Properties
 
 #### Property 27: All registered agents satisfy the Agent interface

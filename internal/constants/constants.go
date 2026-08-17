@@ -117,6 +117,10 @@ const (
 	// Satisfies CC-7.
 	KeyringProfileScript = "/etc/profile.d/dbus-keyring.sh"
 
+	// WorkspaceProfileScript is the path to the shell profile script inside the
+	// container that changes the working directory to WorkspaceMountPath on SSH login.
+	WorkspaceProfileScript = "/etc/profile.d/workspace-cd.sh"
+
 	// HostBindIP is the IP address containers bind their SSH port to on the host.
 	// Satisfies R7.
 	HostBindIP = "127.0.0.1"

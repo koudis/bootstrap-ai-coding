@@ -583,6 +583,42 @@ func TestKeyringProfileScriptPresentInRenameStrategy(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Property 58: Workspace profile script is always created at constants.WorkspaceProfileScript
+// ---------------------------------------------------------------------------
+
+// Feature: bootstrap-ai-coding, Property 58: Workspace profile script is always created at constants.WorkspaceProfileScript
+// Validates: Req 27
+func TestPropertyWorkspaceProfileScriptCreated(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		uid := rapid.IntRange(1000, 65000).Draw(t, "uid")
+		gid := rapid.IntRange(1000, 65000).Draw(t, "gid")
+
+		b := newCreateBuilder(uid, gid)
+		content := b.Build()
+
+		require.Contains(t, content, constants.WorkspaceProfileScript,
+			"Dockerfile must reference WorkspaceProfileScript path %q", constants.WorkspaceProfileScript)
+		require.Contains(t, content, constants.WorkspaceMountPath,
+			"Workspace script must reference WorkspaceMountPath %q", constants.WorkspaceMountPath)
+		require.Contains(t, content, "chmod +x "+constants.WorkspaceProfileScript,
+			"Workspace script must be made executable")
+	})
+}
+
+// TestWorkspaceProfileScriptPresentInRenameStrategy verifies that the workspace-cd
+// setup is also present when using UserStrategyRename.
+// Validates: Req 27
+func TestWorkspaceProfileScriptPresentInRenameStrategy(t *testing.T) {
+	b := newRenameBuilder(1000, 1000, "ubuntu")
+	content := b.Build()
+
+	require.Contains(t, content, constants.WorkspaceProfileScript,
+		"Rename strategy Dockerfile must also create workspace profile script")
+	require.Contains(t, content, constants.WorkspaceMountPath,
+		"Rename strategy Dockerfile must reference WorkspaceMountPath in workspace script")
+}
+
+// ---------------------------------------------------------------------------
 // Node.js deduplication tracking tests
 // ---------------------------------------------------------------------------
 

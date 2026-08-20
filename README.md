@@ -2,7 +2,7 @@
 
 `bootstrap-ai-coding` (`bac`) is a Go CLI tool that provisions an isolated Docker container for AI-assisted coding sessions. Your agent credentials are bind-mounted from the host — no login or settings transfer needed, just run and code.
 
-Primarily designed to work with Codium and Visual Studio Code but it works with any IDE with code-over-ssh.
+Primarily designed to work with Codium and Visual Studio Code but it works well only thru standard SSH session.
 
 ## Install
 

@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: 'internal/cmd/**'
+---
+
 # CLI Flags Reference
 
 All flags are defined in `cmd/root.go` using Cobra. This file is the authoritative reference for flag names, defaults, and the requirements they satisfy.

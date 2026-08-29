@@ -1,3 +1,7 @@
+---
+inclusion: always
+---
+
 # Product: bootstrap-ai-coding (bac)
 
 `bootstrap-ai-coding` is a Go CLI tool that provisions an isolated Docker container for AI-assisted coding sessions.

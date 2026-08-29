@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: 'internal/agents/**'
+---
+
 # Adding a New Agent Module
 
 Agent modules are self-contained Go packages under `agents/`. Adding a new agent requires **no changes to any core file** — only a new package.

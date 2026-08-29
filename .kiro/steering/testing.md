@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: '**/*_test.go'
+---
+
 # Testing Guide
 
 ## Test Types

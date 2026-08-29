@@ -1,3 +1,7 @@
+---
+inclusion: always
+---
+
 # Project Structure
 
 All packages live under `internal/`. The Go compiler enforces that nothing outside this module can import them. The only public surface is the compiled binary.

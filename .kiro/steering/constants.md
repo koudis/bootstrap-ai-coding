@@ -1,3 +1,8 @@
+---
+inclusion: fileMatch
+fileMatchPattern: 'internal/constants/**'
+---
+
 # Constants
 
 All project-wide constants are defined in `constants/constants.go`. Every value that originates from the requirements glossary lives here. No other package may hardcode these values.

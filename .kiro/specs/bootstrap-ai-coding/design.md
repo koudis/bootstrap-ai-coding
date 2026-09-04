@@ -28,6 +28,7 @@ The design is split across multiple focused files:
 | [`design-docker.md`](design-docker.md) | Two-layer Docker image architecture (TL-1 through TL-11): motivation, layer split, builder changes, build flow, cache detection |
 | [`design-data-models.md`](design-data-models.md) | Core data models (Mode, Config, ContainerSpec, SessionSummary), error handling tables, integration test infrastructure |
 | [`design-build-resources.md`](design-build-resources.md) | Build Resources agent module: implementation, design decisions, RunAsUser extension, Dockerfile layer order |
+| [`design-kiro.md`](design-kiro.md) | Kiro agent module: remote IDE over SSH + `kiro-cli` install, `~/.kiro` bind-mount, install-location handling, Dockerfile layer order |
 | [`design-agents.md`](design-agents.md) | Agent modules: contract, Claude Code implementation, adding future agents |
 | [`design-properties.md`](design-properties.md) | Correctness properties (Properties 1–51) and full testing strategy |
 | [`design-agent-summary-info.md`](design-agent-summary-info.md) | Agent Summary Info: KeyValue type, SummaryInfo interface method, generic collection |

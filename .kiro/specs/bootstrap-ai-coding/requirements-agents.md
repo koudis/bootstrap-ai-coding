@@ -40,6 +40,7 @@ Individual agent files below specify how each module satisfies this contract.
 | [Build Resources](./agents/requirements-build-resources.md) | BR-1 through BR-6 | Default pseudo-agent |
 | [Codex](./agents/requirements-codex.md) | CX-1 through CX-6 | Opt-in only |
 | [OpenCode](./agents/requirements-opencode.md) | OC-1 through OC-6 | Opt-in only |
+| [Kiro](./agents/requirements-kiro.md) | KIRO-1 through KIRO-8 | Opt-in only |
 
 ---
 

@@ -71,6 +71,11 @@ const (
 	// Corresponds to the Agent_ID glossary term for OpenCode.
 	OpenCodeAgentName = "open-code"
 
+	// KiroAgentName is the stable Agent_ID for the Kiro CLI agent module.
+	// Corresponds to the Agent_ID glossary term for Kiro (KIRO-1). Opt-in only —
+	// NOT included in DefaultAgents.
+	KiroAgentName = "kiro"
+
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
 	// --agents flag is omitted. Claude Code, Augment Code, Build Resources,
 	// OpenCode, and Codex are enabled by default.

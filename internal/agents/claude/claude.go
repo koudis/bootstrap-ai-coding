@@ -96,7 +96,7 @@ func (a *claudeAgent) HasCredentials(storePath string) (bool, error) {
 	return true, nil
 }
 
-// AdditionalMounts returns the read-only bind-mount for ~/.claude.json.
+// AdditionalMounts returns the read-write bind-mount for ~/.claude.json.
 // If the file does not exist on the host, the mount is omitted.
 func (a *claudeAgent) AdditionalMounts(homeDir string) []docker.Mount {
 	home, err := os.UserHomeDir()
@@ -112,7 +112,7 @@ func (a *claudeAgent) AdditionalMounts(homeDir string) []docker.Mount {
 		{
 			HostPath:      src,
 			ContainerPath: filepath.Join(homeDir, ".claude.json"),
-			ReadOnly:      true,
+			ReadOnly:      false,
 		},
 	}
 }

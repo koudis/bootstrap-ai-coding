@@ -40,7 +40,7 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 2. THE Claude Code module SHALL declare `<Container_User_Home>/.claude` as its Credential_Volume mount path inside the Container.
 3. THE Credential_Volume SHALL be a bind-mount so that authentication tokens written inside the Container are immediately persisted to the Host Credential_Store.
 4. Authentication tokens persisted in the Host Credential_Store SHALL be available in future Sessions without re-authentication.
-5. NOTE: Claude Code also stores global configuration (onboarding state, MCP servers, preferences) in `~/.claude.json` (outside the credential directory). See Requirement CC-8 for how this is handled via a read-only bind-mount from the host.
+5. NOTE: Claude Code also stores global configuration (onboarding state, MCP servers, preferences) in `~/.claude.json` (outside the credential directory). See Requirement CC-8 for how this is handled via a read-write bind-mount from the host.
 
 ---
 
@@ -96,7 +96,7 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 
 ---
 
-### Requirement CC-8: Onboarding & Configuration State via Read-Only Bind-Mount
+### Requirement CC-8: Onboarding & Configuration State via Read-Write Bind-Mount
 
 **User Story:** As a developer, I want my Claude Code global configuration (onboarding state, MCP servers, preferences) to be visible inside the container without needing to rebuild, so that host-side changes propagate immediately.
 
@@ -104,8 +104,8 @@ Claude Code is Anthropic's AI coding agent. It is the first and default agent mo
 
 1. Claude Code stores its global configuration (including `hasCompletedOnboarding` and MCP server definitions) in `~/.claude.json` on the Host — a file in the home directory root, separate from the `~/.claude/` credential directory.
 2. THE Claude Code module SHALL implement the `AdditionalMounter` interface by providing an `AdditionalMounts(homeDir string) []docker.Mount` method.
-3. WHEN `~/.claude.json` exists on the Host, THE `AdditionalMounts` method SHALL return a slice containing a single `docker.Mount` with `HostPath` set to the absolute path of Host `~/.claude.json`, `ContainerPath` set to `<homeDir>/.claude.json`, and `ReadOnly` set to `true`.
-4. THE mount SHALL be read-only — the container cannot modify the host file.
+3. WHEN `~/.claude.json` exists on the Host, THE `AdditionalMounts` method SHALL return a slice containing a single `docker.Mount` with `HostPath` set to the absolute path of Host `~/.claude.json`, `ContainerPath` set to `<homeDir>/.claude.json`, and `ReadOnly` set to `false`.
+4. THE mount SHALL be read-write — changes made by Claude Code inside the container are persisted back to the host file.
 5. WHEN `~/.claude.json` does not exist on the Host (first-time user or file not yet created), THE `AdditionalMounts` method SHALL return an empty slice (graceful skip, no error).
 6. THE Claude Code module SHALL NOT implement the `CredentialPreparer` interface and SHALL NOT copy `~/.claude.json` into the Credential_Store.
 7. THE Claude Code module SHALL NOT create a symlink at `<Container_User_Home>/.claude.json` during image build.

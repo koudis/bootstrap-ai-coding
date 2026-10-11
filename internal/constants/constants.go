@@ -76,6 +76,10 @@ const (
 	// NOT included in DefaultAgents.
 	KiroAgentName = "kiro"
 
+	// KimiCodeAgentName is the stable Agent_ID for the Kimi Code agent module.
+	// Opt-in only — NOT included in DefaultAgents.
+	KimiCodeAgentName = "kimi-code"
+
 	// DefaultAgents is the comma-separated list of agent IDs enabled when the
 	// --agents flag is omitted. Claude Code, Augment Code, Build Resources,
 	// OpenCode, and Codex are enabled by default.

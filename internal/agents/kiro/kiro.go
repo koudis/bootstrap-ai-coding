@@ -37,10 +37,10 @@ func (a *kiroAgent) ID() string {
 
 // Install appends Dockerfile RUN steps that install Node.js 22 (deduplicated
 // via the shared Is/MarkNodeInstalled pattern) and the Kiro CLI via the
-// official installer. The installer places `kiro-cli` under a user-local
-// directory that is not on the default PATH when `docker exec` runs as root,
-// so the binary is symlinked into /usr/local/bin — on every user's default
-// PATH and every exec context.
+// official installer. The installer places `kiro-cli` in the user's
+// ~/.local/bin directory. We install as the Container_User (RunAsUser) so
+// the binary lands in their home dir, and set ENV PATH to include
+// ~/.local/bin so it is reachable in all execution contexts.
 // Satisfies: KIRO-2, KIRO-4.4
 func (a *kiroAgent) Install(b *docker.DockerfileBuilder) {
 	b.Run("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates git unzip && rm -rf /var/lib/apt/lists/*")
@@ -49,21 +49,22 @@ func (a *kiroAgent) Install(b *docker.DockerfileBuilder) {
 		b.MarkNodeInstalled()
 	}
 
-	// Install the Kiro CLI non-interactively, then symlink the resulting binary
-	// into /usr/local/bin so both `docker exec` (running as root, HOME=/root)
-	// and the Container_User's login shell can locate `kiro-cli` on PATH. The
-	// `find` locates the installed binary regardless of the exact directory the
-	// installer chooses.
-	b.Run("curl -fsSL https://cli.kiro.dev/install | bash")
-	b.Run("ln -sf \"$(find / -name kiro-cli -type f 2>/dev/null | head -n1)\" /usr/local/bin/kiro-cli")
-
-	// Pre-create the credential/config directory so the runtime bind-mount does
-	// not cause intermediate parents to be created as root, which would block
-	// writes by the non-root Container_User (same pattern as the OpenCode module).
+	// Pre-create the ~/.local/bin and ~/.kiro directories as root, then chown
+	// them to the Container_User so that the installer (which runs as that user)
+	// can write into ~/.local/bin without permission errors.
 	b.Run(fmt.Sprintf(
-		"mkdir -p %[1]s/.kiro && chown -R %[2]s:%[2]s %[1]s/.kiro",
+		"mkdir -p %[1]s/.local/bin %[1]s/.kiro && chown -R %[2]s:%[2]s %[1]s/.local %[1]s/.kiro",
 		b.HomeDir(), b.Username(),
 	))
+
+	// Add the user-local bin directory to PATH permanently in the image so that
+	// kiro-cli is reachable regardless of whether a login shell is used.
+	b.Env("PATH", fmt.Sprintf("$PATH:%s/.local/bin", b.HomeDir()))
+
+	// Run the installer as the Container_User so kiro-cli lands in their
+	// ~/.local/bin (not root's). The installer also updates the user's shell
+	// profile, which su - will source correctly at runtime.
+	b.RunAsUser("curl -fsSL https://cli.kiro.dev/install | bash")
 }
 
 // CredentialStorePath returns the default host-side credential/config directory

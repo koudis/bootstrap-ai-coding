@@ -41,6 +41,7 @@ Individual agent files below specify how each module satisfies this contract.
 | [Codex](./agents/requirements-codex.md) | CX-1 through CX-6 | Opt-in only |
 | [OpenCode](./agents/requirements-opencode.md) | OC-1 through OC-6 | Opt-in only |
 | [Kiro](./agents/requirements-kiro.md) | KIRO-1 through KIRO-8 | Opt-in only |
+| [Kimi Code](./agents/requirements-kimi-code.md) | KM-1 through KM-9 | Opt-in only |
 
 ---
 

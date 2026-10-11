@@ -1,0 +1,19 @@
+# 2026/09/29 11:01:27.529351 [TestPropertyAdditionalMountsReturnsZeroOrOneReadOnlyMounts] [rapid] draw homeDir: "/a"
+# 2026/09/29 11:01:27.529407 [TestPropertyAdditionalMountsReturnsZeroOrOneReadOnlyMounts] 
+# 	Error Trace:	/home/h/Documents/anypreta/bootstrap-ai-coding/internal/agents/claude/claude_test.go:451
+# 	            				/home/h/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:458
+# 	            				/home/h/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:467
+# 	            				/home/h/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:292
+# 	            				/home/h/go/pkg/mod/pgregory.net/rapid@v1.3.0/engine.go:207
+# 	            				/home/h/Documents/anypreta/bootstrap-ai-coding/internal/agents/claude/claude_test.go:434
+# 	Error:      	Should be true
+# 	Test:       	TestPropertyAdditionalMountsReturnsZeroOrOneReadOnlyMounts
+# 	Messages:   	mount must be read-only
+# 
+v0.4.8#8128794967115170362
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

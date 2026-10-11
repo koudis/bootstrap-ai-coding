@@ -130,8 +130,8 @@ func TestPropertyKiroInstallIncludesCLIAndNode(t *testing.T) {
 			"Dockerfile must include Node.js 22 setup step")
 		require.Contains(rt, content, "cli.kiro.dev/install",
 			"Dockerfile must include the Kiro CLI installer")
-		require.Contains(rt, content, "/usr/local/bin/kiro-cli",
-			"Dockerfile must symlink kiro-cli onto the default PATH")
+		require.Contains(rt, content, "ENV PATH=",
+			"Dockerfile must add ~/.local/bin to PATH via ENV")
 	})
 }
 
@@ -195,12 +195,12 @@ func TestKiroInstallStepsPresent(t *testing.T) {
 		"Dockerfile must contain a Node.js 22 setup step")
 	require.Contains(t, content, "cli.kiro.dev/install",
 		"Dockerfile must contain the Kiro CLI installer")
-	require.Contains(t, content, "/usr/local/bin/kiro-cli",
-		"Dockerfile must symlink kiro-cli onto the default PATH")
-	require.Contains(t, content, "mkdir -p /home/testuser/.kiro",
-		"Dockerfile must pre-create the ~/.kiro credential directory")
-	require.Contains(t, content, "chown -R testuser:testuser /home/testuser/.kiro",
-		"Dockerfile must chown the ~/.kiro directory to the container user")
+	require.Contains(t, content, "ENV PATH=",
+		"Dockerfile must add ~/.local/bin to PATH via ENV")
+	require.Contains(t, content, "mkdir -p /home/testuser/.local/bin /home/testuser/.kiro",
+		"Dockerfile must pre-create ~/.local/bin and ~/.kiro")
+	require.Contains(t, content, "chown -R testuser:testuser /home/testuser/.local /home/testuser/.kiro",
+		"Dockerfile must chown ~/.local and ~/.kiro to the container user")
 	require.Contains(t, content, "unzip",
 		"Dockerfile must install unzip for the Kiro installer")
 }

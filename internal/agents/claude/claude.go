@@ -112,7 +112,7 @@ func (a *claudeAgent) AdditionalMounts(homeDir string) []docker.Mount {
 		{
 			HostPath:      src,
 			ContainerPath: filepath.Join(homeDir, ".claude.json"),
-			ReadOnly:      false,
+			ReadOnly:      true,
 		},
 	}
 }

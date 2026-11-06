@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Enforce Bash Shell",
+      "description": "Before any shell command is executed, remind the agent to prefix the command with 'bash -c' to explicitly use bash as the shell.\n\nMigration note: Tool categories were converted to the tool-name matcher `^(execute_bash|execute_pwsh|control_bash_process|control_pwsh_process|list_processes|get_process_output)$`, reconstructed from the built-in tool list. Confirm it covers the tools you meant, then enable the hook.",
+      "trigger": "PreToolUse",
+      "matcher": "^(execute_bash|execute_pwsh|control_bash_process|control_pwsh_process|list_processes|get_process_output)$",
+      "action": {
+        "type": "agent",
+        "prompt": "You MUST wrap the command with `bash -c \"...\"` to explicitly use bash as the shell. Rewrite the command as: bash -c \"original command here\". Do not run the command directly without the bash -c wrapper."
+      },
+      "enabled": false
+    }
+  ]
+}

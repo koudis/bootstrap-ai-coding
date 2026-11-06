@@ -152,12 +152,10 @@ func setupSharedContainer() error {
 	if err != nil {
 		return fmt.Errorf("creating temp auth dir: %w", err)
 	}
-	credConfigDir, err := os.MkdirTemp("", "opencode-config-*")
-	if err != nil {
-		return fmt.Errorf("creating temp config dir: %w", err)
-	}
 
-	// Prepare mounts: workspace + primary credential store + additional mounts
+	// Prepare mounts: workspace + primary credential store + additional mounts.
+	// Each additional mount gets its own temp directory so bind-mount paths
+	// are independent.
 	mounts := []docker.Mount{
 		{
 			HostPath:      projectDir,
@@ -171,11 +169,16 @@ func setupSharedContainer() error {
 		},
 	}
 
-	// Add additional mounts from the AdditionalMounter interface
+	// Add additional mounts from the AdditionalMounter interface, giving each
+	// its own host-side temp directory.
 	if mounter, ok := opencodeAgent.(agent.AdditionalMounter); ok {
 		for _, extra := range mounter.AdditionalMounts(info.HomeDir) {
+			tmpDir, mkErr := os.MkdirTemp("", "opencode-extra-*")
+			if mkErr != nil {
+				return fmt.Errorf("creating temp dir for additional mount %s: %w", extra.ContainerPath, mkErr)
+			}
 			mounts = append(mounts, docker.Mount{
-				HostPath:      credConfigDir,
+				HostPath:      tmpDir,
 				ContainerPath: extra.ContainerPath,
 				ReadOnly:      extra.ReadOnly,
 			})
@@ -209,8 +212,8 @@ func setupSharedContainer() error {
 		return fmt.Errorf("starting container: %w", err)
 	}
 
-	// OpenCode installation takes longer (npm install) — allow up to 2 minutes for SSH.
-	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 120*time.Second)
+	// OpenCode v2 is a native binary installed via curl — allow up to 3 minutes for the build.
+	err = docker.WaitForSSH(ctx, "127.0.0.1", port, 180*time.Second)
 	if err != nil {
 		return fmt.Errorf("waiting for SSH to be ready: %w", err)
 	}
@@ -292,11 +295,17 @@ func TestOpenCodeCredentialMountsExist(t *testing.T) {
 	require.NoError(t, err, "exec ls -d primary credential path")
 	require.Equal(t, 0, exitCode, "expected primary credential mount path %s to exist", primaryPath)
 
-	// Verify additional credential mount path exists (~/.config/opencode)
+	// Verify additional mount: ~/.config/opencode (user configuration)
 	configPath := filepath.Join(info.HomeDir, ".config", "opencode")
 	exitCode, err = docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"ls", "-d", configPath})
 	require.NoError(t, err, "exec ls -d additional credential path")
-	require.Equal(t, 0, exitCode, "expected additional credential mount path %s to exist", configPath)
+	require.Equal(t, 0, exitCode, "expected config mount path %s to exist", configPath)
+
+	// Verify additional mount: ~/.local/state/opencode (model.json, prompt-history.jsonl)
+	statePath := filepath.Join(info.HomeDir, ".local", "state", "opencode")
+	exitCode, err = docker.ExecInContainer(ctx, sharedClient, sharedContainerName, []string{"ls", "-d", statePath})
+	require.NoError(t, err, "exec ls -d state mount path")
+	require.Equal(t, 0, exitCode, "expected state mount path %s to exist", statePath)
 }
 
 // ----------------------------------------------------------------------------

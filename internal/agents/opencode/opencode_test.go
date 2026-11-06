@@ -132,47 +132,45 @@ func TestPropertyOpenCodeContainerMountPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Property 4: OpenCode Dockerfile steps include Node.js 22 and opencode-ai package
+// Property 4: OpenCode Dockerfile steps use the v2 installer script
 // ---------------------------------------------------------------------------
 
-// Feature: opencode-agent, Property 4: OpenCode Dockerfile steps include Node.js 22 and opencode-ai package
-func TestPropertyOpenCodeInstallIncludesNodeAndPackage(t *testing.T) {
+// Feature: opencode-agent, Property 4: OpenCode Dockerfile steps use the v2 installer script
+func TestPropertyOpenCodeInstallUsesV2Installer(t *testing.T) {
 	// Validates: Requirements 2.1, 2.2, 2.3
 	rapid.Check(t, func(rt *rapid.T) {
 		a, err := agent.Lookup(constants.OpenCodeAgentName)
 		require.NoError(rt, err, "opencode agent must be registered")
 
-		nodePreInstalled := rapid.Bool().Draw(rt, "nodePreInstalled")
-
 		b := newTestBuilder()
-		if nodePreInstalled {
-			b.MarkNodeInstalled()
-		}
-
 		a.Install(b)
 		content := b.Build()
 
-		// Must always contain opencode-ai
-		require.Contains(rt, content, "opencode-ai",
-			"Dockerfile must include opencode-ai installation step")
+		// Must invoke the official v2 install script
+		require.Contains(rt, content, "https://opencode.ai/v2/install",
+			"Dockerfile must include the opencode v2 installer URL")
 
-		if !nodePreInstalled {
-			// When Node.js is NOT pre-installed: must contain setup_22.x
-			require.Contains(rt, content, "setup_22.x",
-				"Dockerfile must include Node.js 22 setup step when not pre-installed")
-		} else {
-			// When Node.js IS pre-installed: must NOT contain setup_22.x
-			require.NotContains(rt, content, "setup_22.x",
-				"Dockerfile must NOT include Node.js 22 setup step when already pre-installed")
-		}
+		// Must add ~/.opencode/bin to PATH via profile.d and symlink into /usr/local/bin
+		require.Contains(rt, content, ".opencode/bin",
+			"Dockerfile must add ~/.opencode/bin to PATH")
+		require.Contains(rt, content, "/usr/local/bin/opencode",
+			"Dockerfile must symlink opencode into /usr/local/bin")
+		require.Contains(rt, content, "/etc/profile.d/opencode-path.sh",
+			"Dockerfile must write a profile.d PATH script")
+
+		// Must NOT use the old npm package — v2 is a native binary
+		require.NotContains(rt, content, "opencode-ai",
+			"Dockerfile must NOT use the legacy npm opencode-ai package")
+		require.NotContains(rt, content, "setup_22.x",
+			"Dockerfile must NOT install Node.js — v2 is a native binary")
 	})
 }
 
 // ---------------------------------------------------------------------------
-// Property 5: OpenCode additional mounts declare the config store
+// Property 5: OpenCode additional mounts declare the config and state stores
 // ---------------------------------------------------------------------------
 
-// Feature: opencode-agent, Property 5: OpenCode additional mounts declare the config store
+// Feature: opencode-agent, Property 5: OpenCode additional mounts declare the config and state stores
 func TestPropertyOpenCodeAdditionalMounts(t *testing.T) {
 	// Validates: Requirements 3.3, 3.4
 	rapid.Check(t, func(rt *rapid.T) {
@@ -186,17 +184,28 @@ func TestPropertyOpenCodeAdditionalMounts(t *testing.T) {
 		require.True(rt, ok, "opencode agent must implement AdditionalMounter")
 
 		mounts := mounter.AdditionalMounts(homeDir)
-		require.Len(rt, mounts, 1,
-			"AdditionalMounts must return exactly one mount")
+		require.Len(rt, mounts, 2,
+			"AdditionalMounts must return exactly two mounts (config + state)")
 
-		mount := mounts[0]
-		wantContainerPath := filepath.Join(homeDir, ".config", "opencode")
-		require.Equal(rt, wantContainerPath, mount.ContainerPath,
-			"mount ContainerPath must be <homeDir>/.config/opencode")
-		require.False(rt, mount.ReadOnly,
-			"mount ReadOnly must be false")
-		require.True(rt, strings.HasSuffix(mount.HostPath, filepath.Join(".config", "opencode")),
-			"mount HostPath must end with .config/opencode, got %q", mount.HostPath)
+		// Mount 0: ~/.config/opencode — user configuration
+		configMount := mounts[0]
+		wantConfigPath := filepath.Join(homeDir, ".config", "opencode")
+		require.Equal(rt, wantConfigPath, configMount.ContainerPath,
+			"mounts[0] ContainerPath must be <homeDir>/.config/opencode")
+		require.False(rt, configMount.ReadOnly,
+			"mounts[0] ReadOnly must be false")
+		require.True(rt, strings.HasSuffix(configMount.HostPath, filepath.Join(".config", "opencode")),
+			"mounts[0] HostPath must end with .config/opencode, got %q", configMount.HostPath)
+
+		// Mount 1: ~/.local/state/opencode — runtime state (model.json, prompt-history.jsonl)
+		stateMount := mounts[1]
+		wantStatePath := filepath.Join(homeDir, ".local", "state", "opencode")
+		require.Equal(rt, wantStatePath, stateMount.ContainerPath,
+			"mounts[1] ContainerPath must be <homeDir>/.local/state/opencode")
+		require.False(rt, stateMount.ReadOnly,
+			"mounts[1] ReadOnly must be false")
+		require.True(rt, strings.HasSuffix(stateMount.HostPath, filepath.Join(".local", "state", "opencode")),
+			"mounts[1] HostPath must end with .local/state/opencode, got %q", stateMount.HostPath)
 	})
 }
 
@@ -336,46 +345,29 @@ func TestOpenCodeHasCredentialsStatError(t *testing.T) {
 	require.Contains(t, credErr.Error(), "checking opencode credentials")
 }
 
-// TestOpenCodeInstallNodeNotInstalled verifies that when IsNodeInstalled()
-// returns false, OpenCode appends Node.js install steps and calls MarkNodeInstalled().
-func TestOpenCodeInstallNodeNotInstalled(t *testing.T) {
+// TestOpenCodeInstallUsesV2Installer verifies that Install() uses the opencode
+// v2 installer script, symlinks the binary into /usr/local/bin, adds
+// ~/.opencode/bin to PATH via profile.d, and does not use npm.
+func TestOpenCodeInstallUsesV2Installer(t *testing.T) {
 	a, err := agent.Lookup(constants.OpenCodeAgentName)
 	require.NoError(t, err)
 
 	b := newTestBuilder()
-	require.False(t, b.IsNodeInstalled(), "fresh builder must have IsNodeInstalled() == false")
-
 	a.Install(b)
 	content := b.Build()
 
-	require.Contains(t, content, "setup_22.x",
-		"must install Node.js 22 when not already installed")
-	require.Contains(t, content, "opencode-ai",
-		"must always install the opencode-ai npm package")
-	require.True(t, b.IsNodeInstalled(),
-		"MarkNodeInstalled() must be called after Node.js installation")
-}
-
-// TestOpenCodeInstallNodeAlreadyInstalled verifies that when IsNodeInstalled()
-// returns true, OpenCode skips Node.js install steps but still installs its npm package.
-func TestOpenCodeInstallNodeAlreadyInstalled(t *testing.T) {
-	a, err := agent.Lookup(constants.OpenCodeAgentName)
-	require.NoError(t, err)
-
-	b := newTestBuilder()
-	b.MarkNodeInstalled() // simulate a prior agent having installed Node.js
-	require.True(t, b.IsNodeInstalled())
-
-	a.Install(b)
-	content := b.Build()
-
-	// Must NOT contain the Node.js setup step
+	require.Contains(t, content, "https://opencode.ai/v2/install",
+		"must invoke the v2 installer script")
+	require.Contains(t, content, "/usr/local/bin/opencode",
+		"must symlink opencode into /usr/local/bin")
+	require.Contains(t, content, ".opencode/bin",
+		"must reference ~/.opencode/bin")
+	require.Contains(t, content, "/etc/profile.d/opencode-path.sh",
+		"must write profile.d PATH script")
+	require.NotContains(t, content, "opencode-ai",
+		"must not use the legacy npm opencode-ai package")
 	require.NotContains(t, content, "setup_22.x",
-		"must skip Node.js setup when already installed")
-
-	// Must still install the npm package
-	require.Contains(t, content, "opencode-ai",
-		"must always install the opencode-ai npm package")
+		"must not install Node.js — v2 is a native binary")
 }
 
 // TestOpenCodeContainerMountPath verifies that ContainerMountPath equals
@@ -389,7 +381,7 @@ func TestOpenCodeContainerMountPath(t *testing.T) {
 }
 
 // TestOpenCodeAdditionalMounts verifies that AdditionalMounts returns exactly
-// one mount with the correct ContainerPath and ReadOnly=false.
+// two mounts: the config directory and the state directory, both read-write.
 func TestOpenCodeAdditionalMounts(t *testing.T) {
 	a, err := agent.Lookup(constants.OpenCodeAgentName)
 	require.NoError(t, err)
@@ -398,13 +390,21 @@ func TestOpenCodeAdditionalMounts(t *testing.T) {
 	require.True(t, ok, "opencode agent must implement AdditionalMounter")
 
 	mounts := mounter.AdditionalMounts("/home/testuser")
-	require.Len(t, mounts, 1)
+	require.Len(t, mounts, 2)
 
-	mount := mounts[0]
-	require.Equal(t, "/home/testuser/.config/opencode", mount.ContainerPath)
-	require.False(t, mount.ReadOnly)
-	require.True(t, strings.HasSuffix(mount.HostPath, filepath.Join(".config", "opencode")),
-		"HostPath must end with .config/opencode, got %q", mount.HostPath)
+	// Mount 0: config
+	configMount := mounts[0]
+	require.Equal(t, "/home/testuser/.config/opencode", configMount.ContainerPath)
+	require.False(t, configMount.ReadOnly)
+	require.True(t, strings.HasSuffix(configMount.HostPath, filepath.Join(".config", "opencode")),
+		"HostPath must end with .config/opencode, got %q", configMount.HostPath)
+
+	// Mount 1: state (model.json, prompt-history.jsonl)
+	stateMount := mounts[1]
+	require.Equal(t, "/home/testuser/.local/state/opencode", stateMount.ContainerPath)
+	require.False(t, stateMount.ReadOnly)
+	require.True(t, strings.HasSuffix(stateMount.HostPath, filepath.Join(".local", "state", "opencode")),
+		"HostPath must end with .local/state/opencode, got %q", stateMount.HostPath)
 }
 
 // TestOpenCodeSummaryInfoReturnsNil verifies that the OpenCode agent's SummaryInfo
